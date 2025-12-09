@@ -1,0 +1,555 @@
+"""
+Fedora Reverse Dependency Checker
+
+Checks if updating a package to a new version will break any reverse dependencies
+in Fedora rawhide. Uses DNF Python bindings with cached repository data.
+
+Usage:
+    fedora-revdep-check <srpm-name> <new-version>
+
+Example:
+    fedora-revdep-check jupyterlab 4.7.0
+"""
+
+import sys
+import re
+import argparse
+import operator
+from collections import defaultdict
+from typing import Dict, List, Tuple
+import libdnf5
+import rpm
+
+
+# Mapping of RPM dependency operators to Python operator functions
+OPERATOR_MAP = {
+    '<': operator.lt,
+    '<=': operator.le,
+    '>': operator.gt,
+    '>=': operator.ge,
+    '=': operator.eq,
+    '==': operator.eq,
+    '!=': operator.ne,
+}
+
+
+class FedoraRevDepChecker:
+    """Check reverse dependencies for Fedora package updates."""
+
+    def __init__(self, verbose=False, base=None, repos=None):
+        """Initialize the checker with DNF base and cached repo data.
+
+        Args:
+            verbose: Enable verbose output
+            base: Optional DNF base object for testing (if None, creates real DNF base)
+            repos: List of repository IDs to enable (default: ['rawhide', 'rawhide-source'])
+        """
+        self.verbose = verbose
+        self.base = base
+        self.repos = repos if repos is not None else ['rawhide', 'rawhide-source']
+        if self.base is None:
+            self._init_dnf()
+
+    def _init_dnf(self):
+        """Initialize DNF 5 base and load repository metadata."""
+        if self.verbose:
+            print("Initializing DNF 5 and loading repository metadata...")
+        self.base = libdnf5.base.Base()
+
+        # Detect releasever from first repo name, or use 'rawhide' as default
+        # Extract version from repo names like 'fedora-40', 'f40', or use 'rawhide'
+        releasever = 'rawhide'
+        if self.repos:
+            first_repo = self.repos[0]
+            # Check if repo contains a version number
+            import re
+            version_match = re.search(r'(\d+)', first_repo)
+            if version_match:
+                releasever = version_match.group(1)
+            elif 'rawhide' not in first_repo.lower():
+                # If no version found and not rawhide, still use rawhide as fallback
+                releasever = 'rawhide'
+
+        # Configure releasever
+        vars_map = self.base.get_vars()
+        vars_map.set('releasever', releasever)
+
+        # Create repositories from system configuration
+        repo_sack = self.base.get_repo_sack()
+        repo_sack.create_repos_from_system_configuration()
+
+        # Create repo query to manage repositories
+        repo_query = libdnf5.repo.RepoQuery(self.base)
+
+        # First, disable all repositories
+        for repo in repo_query:
+            repo.disable()
+
+        # Enable specified repositories
+        enabled_count = 0
+
+        for repo_id in self.repos:
+            # Filter for this specific repo ID
+            specific_query = libdnf5.repo.RepoQuery(repo_query)
+            specific_query.filter_id(repo_id)
+
+            found = False
+            for repo in specific_query:
+                repo.enable()
+                enabled_count += 1
+                found = True
+                if self.verbose:
+                    print(f"  Enabled repo: {repo_id}")
+
+            if not found and self.verbose:
+                print(f"  Warning: Repository '{repo_id}' not found in configuration")
+
+        if enabled_count == 0:
+            raise RuntimeError(
+                f"Failed to enable any repositories from: {', '.join(self.repos)}. "
+                "Please ensure the repositories are configured in /etc/yum.repos.d/"
+            )
+
+        if self.verbose:
+            print(f"Enabled {enabled_count} repository/repositories")
+
+        # Setup the base before loading repos
+        self.base.setup()
+
+        # Load repository metadata
+        if self.verbose:
+            print("Loading repository metadata (this may take a moment)...")
+        repo_sack.load_repos()
+        if self.verbose:
+            print("Repository metadata loaded and cached.")
+
+    def get_binary_packages(self, srpm_name: str) -> List[libdnf5.rpm.Package]:
+        """Get all binary packages built from the given SRPM."""
+        query = libdnf5.rpm.PackageQuery(self.base)
+
+        # Find packages with matching source name (first pass)
+        matching_names = []
+        for pkg in query:
+            if pkg.get_source_name() == srpm_name:
+                matching_names.append(pkg.get_name())
+
+        if not matching_names:
+            if self.verbose:
+                print(f"Searched for packages from source '{srpm_name}'")
+                print("  No packages found. Checking if source package exists...")
+                # Try to find if there's a similarly named package
+                name_query = libdnf5.rpm.PackageQuery(self.base)
+                name_query.filter_name([srpm_name])
+                for p in name_query:
+                    print(f"  Found binary package '{p.get_name()}' with source_name='{p.get_source_name()}'")
+            return []
+
+        # Get unique package names
+        unique_names = list(set(matching_names))
+
+        # Create a new query for these specific packages
+        result_query = libdnf5.rpm.PackageQuery(self.base)
+        result_query.filter_name(unique_names)
+
+        # Filter to latest versions only
+        result_query.filter_latest_evr()
+
+        # Deduplicate by NEVRA and filter out source packages
+        seen_nevra = set()
+        unique_packages = []
+        for pkg in result_query:
+            # Skip source packages (we only want binary packages for dependency checking)
+            if pkg.get_arch() == 'src':
+                continue
+
+            nevra = f"{pkg.get_name()}-{pkg.get_epoch()}:{pkg.get_version()}-{pkg.get_release()}.{pkg.get_arch()}"
+            if nevra not in seen_nevra:
+                seen_nevra.add(nevra)
+                unique_packages.append(pkg)
+
+        if self.verbose:
+            print(f"Searched for packages from source '{srpm_name}'")
+            print(f"  Found {len(unique_names)} unique package name(s), filtered to latest versions")
+
+        return unique_packages
+
+    def get_provides(self, package: libdnf5.rpm.Package) -> List[Tuple[str, str]]:
+        """
+        Get all provides from a package, filtering out bundled provides.
+
+        Returns list of (provide_name, provide_version, provide_str) tuples.
+        """
+        provides = []
+        for prv in package.get_provides():
+            provide_str = prv.to_string()
+
+            # Skip bundled provides
+            if provide_str.startswith('bundled('):
+                continue
+
+            # Parse provide into name and version
+            # Format can be: "name = version", "name >= version", "name", etc.
+            match = re.match(r'^([^\s<>=]+)\s*(?:([<>=]+)\s*(.+))?$', provide_str)
+            if match:
+                provide_name = match.group(1)
+                provide_version = match.group(3) if match.group(3) else None
+                provides.append((provide_name, provide_version, provide_str))
+
+        return provides
+
+    def find_reverse_dependencies(self, provide_name: str) -> List[libdnf5.rpm.Package]:
+        """Find all packages that require the given provide."""
+        query = libdnf5.rpm.PackageQuery(self.base)
+
+        # Filter packages that require this provide
+        query.filter_requires([provide_name])
+
+        # Filter to latest versions only to avoid duplicates from multiple repos/versions
+        query.filter_latest_evr()
+
+        return list(query)
+
+    def simulate_version_change(self, srpm_name: str, new_version: str) -> Dict:
+        """
+        Simulate updating the package to a new version and check for conflicts.
+
+        Returns a dictionary with conflict information.
+        """
+        if self.verbose:
+            print(f"\nAnalyzing impact of updating {srpm_name} to version {new_version}...\n")
+
+        # Get all binary packages from this SRPM
+        binary_packages = self.get_binary_packages(srpm_name)
+
+        if not binary_packages:
+            return {
+                'error': f"No packages found for source package: {srpm_name}",
+                'binary_packages': []
+            }
+
+        if self.verbose:
+            print(f"Found {len(binary_packages)} binary package(s) from {srpm_name}:")
+            for pkg in binary_packages:
+                print(f"  - {pkg.get_name()}-{pkg.get_version()}-{pkg.get_release()}")
+            print()
+
+        # Collect all provides from all binary packages
+        all_provides = defaultdict(list)  # provide_name -> [(pkg, provide_str, old_version)]
+
+        for pkg in binary_packages:
+            provides = self.get_provides(pkg)
+            if self.verbose:
+                print(f"Package {pkg.get_name()} has {len(provides)} provides (excluding bundled)")
+            for prov_name, prov_version, prov_str in provides:
+                all_provides[prov_name].append((pkg, prov_str, prov_version))
+
+        if self.verbose:
+            print(f"Found {len(all_provides)} unique provides (excluding bundled)")
+            for prov_name in sorted(all_provides.keys()):
+                print(f"  - {prov_name}")
+            print()
+
+        # For each provide, find reverse dependencies and check conflicts
+        conflicts = []
+        checked_requirements = set()  # Track (pkg_key, req_str) to avoid duplicates
+
+        for prov_name, prov_info_list in all_provides.items():
+            rdeps = self.find_reverse_dependencies(prov_name)
+
+            if self.verbose and rdeps:
+                print(f"Provide '{prov_name}' has {len(rdeps)} reverse dependencies")
+
+            if not rdeps:
+                continue
+
+            for rdep_pkg in rdeps:
+                # Skip packages from the same SRPM - they'll be updated together
+                if rdep_pkg.get_source_name() == srpm_name:
+                    if self.verbose:
+                        print(f"  Skipping {rdep_pkg.get_name()} (from same SRPM: {srpm_name})")
+                    continue
+
+                pkg_key = f"{rdep_pkg.get_name()}-{rdep_pkg.get_version()}-{rdep_pkg.get_release()}"
+
+                # Check if this package's requirements would be satisfied with new version
+                for req in rdep_pkg.get_requires():
+                    req_str = req.to_string()
+
+                    # Check if this requirement mentions our provide
+                    # We need precise matching to avoid false positives like
+                    # "pytest" matching "pytest-xdist" or "python3dist(pytest-xdist)"
+                    if not self._requirement_matches_provide(req_str, prov_name):
+                        continue
+
+                    # Avoid checking the same requirement multiple times
+                    check_key = (pkg_key, req_str)
+                    if check_key in checked_requirements:
+                        continue
+                    checked_requirements.add(check_key)
+
+                    if self.verbose:
+                        print(f"  Checking: {rdep_pkg.get_name()} requires {req_str}")
+
+                    # Check if the new version would satisfy this requirement
+                    conflict = self._check_requirement_conflict(
+                        req_str, prov_name, new_version, rdep_pkg, prov_info_list
+                    )
+
+                    if conflict:
+                        conflicts.append(conflict)
+                        if self.verbose:
+                            print(f"    -> CONFLICT: {conflict['failed_constraint']}")
+
+        return {
+            'srpm_name': srpm_name,
+            'new_version': new_version,
+            'binary_packages': [f"{pkg.get_name()}-{pkg.get_version()}-{pkg.get_release()}" for pkg in binary_packages],
+            'conflicts': conflicts
+        }
+
+    def _requirement_matches_provide(self, req_str: str, prov_name: str) -> bool:
+        """
+        Check if a requirement string actually references the given provide.
+
+        This does precise matching to avoid false positives like:
+        - "pytest" matching "pytest-xdist"
+        - "python3dist(pytest)" matching "python3dist(pytest-xdist)"
+
+        Args:
+            req_str: Requirement string (e.g., "python3dist(pytest) >= 4")
+            prov_name: Provide name to check (e.g., "python3dist(pytest)")
+
+        Returns:
+            True if the requirement references this provide, False otherwise
+        """
+        req_clean = req_str.strip()
+
+        # Handle rich dependencies starting with parentheses
+        if req_clean.startswith('('):
+            # Remove outer parentheses
+            req_clean = req_clean[1:-1] if req_clean.endswith(')') else req_clean[1:]
+
+            # Split by boolean operators (with, if, unless, or, and)
+            # We need to check if any of the parts match our provide
+            parts = re.split(r'\s+(?:with|if|unless|or|and)\s+', req_clean)
+
+            for part in parts:
+                # Each part should be like "name op version" or just "name"
+                # Extract the name (first token before any operator)
+                match = re.match(r'^([^\s<>=]+)', part.strip())
+                if match and match.group(1) == prov_name:
+                    return True
+            return False
+        else:
+            # Simple requirement, must start with the provide name
+            # followed by whitespace, operator, or end of string
+            # This prevents "pytest" from matching "pytest-xdist"
+            if req_str.startswith(prov_name):
+                # Check what comes after the provide name
+                if len(req_str) == len(prov_name):
+                    return True  # Exact match
+                next_char = req_str[len(prov_name)]
+                # Must be followed by space, comparison operator, exclamation (for !=), or parenthesis close
+                return next_char in ' <>=()\t!'
+            return False
+
+    def _check_requirement_conflict(
+        self, req_str: str, prov_name: str, new_version: str,
+        rdep_pkg: libdnf5.rpm.Package, prov_info_list: List
+    ) -> Dict:
+        """
+        Check if a requirement would conflict with the new version.
+
+        Returns conflict info dict if there's a conflict, None otherwise.
+        """
+        # Parse the requirement string to extract constraints
+        # Format examples:
+        #   "python3dist(jupyterlab) >= 4.5~rc0"
+        #   "(python3dist(jupyterlab) >= 4 with python3dist(jupyterlab) < 5)"
+        #   "python3dist(jupyterlab) < 4.6~~"
+
+        # Handle rich dependencies (with "with", "if", "unless")
+        if ' with ' in req_str or ' if ' in req_str or ' unless ' in req_str:
+            # For now, we'll parse "with" clauses
+            # This is a simplified parser for common cases
+            constraints = []
+
+            # Remove outer parentheses
+            req_clean = req_str.strip()
+            if req_clean.startswith('(') and req_clean.endswith(')'):
+                req_clean = req_clean[1:-1]
+
+            # Split by "with" to get multiple constraints
+            parts = re.split(r'\s+with\s+', req_clean)
+            for part in parts:
+                match = re.match(r'([^\s<>=]+)\s*([<>=]+)\s*(.+)', part.strip())
+                if match and match.group(1) == prov_name:
+                    constraints.append({
+                        'name': match.group(1),
+                        'op': match.group(2),
+                        'version': match.group(3)
+                    })
+        else:
+            # Simple constraint
+            match = re.match(r'([^\s<>=]+)\s*([<>=]+)\s*(.+)', req_str.strip())
+            if match and match.group(1) == prov_name:
+                constraints = [{
+                    'name': match.group(1),
+                    'op': match.group(2),
+                    'version': match.group(3)
+                }]
+            else:
+                # No version constraint, just package name
+                constraints = []
+
+        # Check if new version satisfies all constraints
+        if constraints:
+            for constraint in constraints:
+                if not self._version_satisfies(new_version, constraint['op'], constraint['version']):
+                    return {
+                        'rdep_package': f"{rdep_pkg.get_name()}-{rdep_pkg.get_version()}-{rdep_pkg.get_release()}",
+                        'rdep_source': rdep_pkg.get_source_name(),
+                        'rdep_arch': rdep_pkg.get_arch(),
+                        'requirement': req_str,
+                        'provide_name': prov_name,
+                        'new_version': new_version,
+                        'failed_constraint': f"{prov_name} {constraint['op']} {constraint['version']}"
+                    }
+
+        return None
+
+    def _version_satisfies(self, version: str, op: str, required_version: str) -> bool:
+        """
+        Check if a version satisfies a requirement using RPM version comparison.
+
+        Uses rpm.labelCompare which understands RPM versioning including
+        tilde (~) for pre-releases and caret (^) for post-releases.
+        """
+        # Parse versions into (epoch, version, release) tuples
+        # If no epoch or release is specified, use defaults
+        def parse_evr(ver_str):
+            """Parse a version string into (epoch, version, release) tuple."""
+            epoch = None
+            version = ver_str
+            release = None
+
+            # Check for epoch (e.g., "1:2.3.4-1")
+            if ':' in ver_str:
+                epoch_str, rest = ver_str.split(':', 1)
+                epoch = epoch_str
+                ver_str = rest
+
+            # Check for release (e.g., "2.3.4-1")
+            if '-' in ver_str:
+                version, release = ver_str.rsplit('-', 1)
+            else:
+                version = ver_str
+
+            # rpm.labelCompare expects strings or None
+            return (epoch or '0', version, release or '0')
+
+        evr1 = parse_evr(version)
+        evr2 = parse_evr(required_version)
+
+        # rpm.labelCompare returns -1, 0, or 1
+        cmp_result = rpm.labelCompare(evr1, evr2)
+
+        # Get the comparison function from the mapping
+        op_func = OPERATOR_MAP.get(op)
+        if op_func:
+            result = op_func(cmp_result, 0)
+        else:
+            # Unknown operator
+            result = False
+
+        if self.verbose:
+            print(f"      Version check: {version} {op} {required_version} => {result} (cmp={cmp_result})")
+
+        return result
+
+    def print_results(self, results: Dict):
+        """Print analysis results in a readable format."""
+        if 'error' in results:
+            print(f"ERROR: {results['error']}")
+            return
+
+        conflicts = results['conflicts']
+
+        if not conflicts:
+            if self.verbose:
+                print(f"No conflicts detected for {results['srpm_name']} {results['new_version']}")
+        else:
+            # Separate conflicts by type
+            ftbfs_conflicts = []
+            fti_conflicts = []
+
+            for conflict in conflicts:
+                is_source = conflict['rdep_arch'] == 'src'
+                if is_source:
+                    ftbfs_conflicts.append(conflict)
+                else:
+                    fti_conflicts.append(conflict)
+
+            # Print FTBFS section
+            if ftbfs_conflicts:
+                print("These packages would FTBFS:")
+                for conflict in ftbfs_conflicts:
+                    package_name = conflict['rdep_source']
+                    print(f"  {package_name}: {conflict['failed_constraint']}")
+
+            # Print FTI section
+            if fti_conflicts:
+                if ftbfs_conflicts:
+                    print()  # Empty line between sections
+                print("These packages would FTI:")
+                for conflict in fti_conflicts:
+                    package_name = conflict['rdep_package']
+                    print(f"  {package_name}: {conflict['failed_constraint']}")
+
+
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description='Check reverse dependencies for Fedora package updates',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s jupyterlab 4.7.0
+  %(prog)s python-requests 2.32.0 --verbose
+  %(prog)s pytest 8.0.0 --repo fedora --repo fedora-source
+  %(prog)s numpy 2.0.0 --repo fedora-40 --repo fedora-40-source
+        """
+    )
+
+    parser.add_argument('srpm_name', help='Source package name (SRPM)')
+    parser.add_argument('new_version', help='New version to test')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Enable verbose output')
+    parser.add_argument('-r', '--repo', action='append', dest='repos',
+                        help='Repository ID to enable (can be specified multiple times). '
+                             'Default: rawhide and rawhide-source')
+
+    args = parser.parse_args()
+
+    try:
+        checker = FedoraRevDepChecker(verbose=args.verbose, repos=args.repos)
+        results = checker.simulate_version_change(args.srpm_name, args.new_version)
+        checker.print_results(results)
+
+        # Exit with error code if conflicts found
+        if results.get('conflicts'):
+            sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("\n\nInterrupted by user.")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
