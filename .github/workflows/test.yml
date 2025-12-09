@@ -21,6 +21,7 @@ jobs:
       uses: fedora-python/tox-github-action@main
       with:
         tox_env: ${{ matrix.tox-env }}
+        dnf_install: python3-rpm
 
   lint:
     name: Lint
