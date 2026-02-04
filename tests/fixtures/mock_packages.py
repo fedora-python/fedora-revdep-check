@@ -541,3 +541,75 @@ def create_same_srpm_dependency_scenario():
     ]
 
     return MockBase(packages=packages)
+
+
+def create_already_broken_scenario():
+    """
+    Create a scenario with both new conflicts and already-broken packages.
+
+    Scenario:
+    - library 4.0.0 currently installed
+    - old-package requires library < 3.0 (already broken with current 4.0.0)
+    - new-package requires library < 5.0 (will break when upgrading to 5.0.0)
+    """
+    packages = [
+        # Library package
+        MockPackage(
+            name='library',
+            version='4.0.0',
+            release='1.fc40',
+            arch='noarch',
+            source_name='library',
+            provides=[
+                'library',
+                'library = 4.0.0-1.fc40',
+                'python3dist(library) = 4.0.0',
+            ]
+        ),
+        # Old package (already broken)
+        MockPackage(
+            name='python3-old-package',
+            version='1.0.0',
+            release='1.fc40',
+            arch='noarch',
+            source_name='old-package',
+            requires=[
+                'python3dist(library) < 3.0',  # Already fails with 4.0.0
+            ]
+        ),
+        # Old package SRPM (for FTBFS testing)
+        MockPackage(
+            name='old-package',
+            version='1.0.0',
+            release='1.fc40',
+            arch='src',
+            source_name='old-package',
+            requires=[
+                'python3dist(library) < 3.0',  # Already fails with 4.0.0
+            ]
+        ),
+        # New package (will break with 5.0.0)
+        MockPackage(
+            name='python3-new-package',
+            version='1.0.0',
+            release='1.fc40',
+            arch='noarch',
+            source_name='new-package',
+            requires=[
+                'python3dist(library) < 5.0',  # Will fail with 5.0.0
+            ]
+        ),
+        # New package SRPM (for FTBFS testing)
+        MockPackage(
+            name='new-package',
+            version='1.0.0',
+            release='1.fc40',
+            arch='src',
+            source_name='new-package',
+            requires=[
+                'python3dist(library) < 5.0',  # Will fail with 5.0.0
+            ]
+        ),
+    ]
+
+    return MockBase(packages=packages)

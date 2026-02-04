@@ -140,3 +140,99 @@ class TestFullWorkflow:
 
         # Outputs should be identical (deterministic)
         assert output1.getvalue() == output2.getvalue()
+
+    def test_main_exit_code_zero_for_already_broken_only(self, monkeypatch, mock_dnf_base, capsys):
+        """Test that main() exits with 0 when only already-broken packages are found."""
+        monkeypatch.setattr('sys.argv', ['fedora-revdep-check', 'pytest', '8.0.0'])
+
+        original_init = FedoraRevDepChecker.__init__
+
+        def mock_init(self, verbose=False, base=None, repos=None):
+            original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos)
+
+        # Mock simulate_version_change to return only already-broken conflicts
+        original_simulate = FedoraRevDepChecker.simulate_version_change
+
+        def mock_simulate(self, srpm_name, new_version):
+            return {
+                'srpm_name': srpm_name,
+                'new_version': new_version,
+                'binary_packages': ['python3-pytest-7.0.0-1.fc40'],
+                'conflicts': [
+                    {
+                        'rdep_package': 'oldpkg-1.0.0-1.fc40',
+                        'rdep_source': 'oldpkg',
+                        'rdep_arch': 'src',
+                        'requirement': 'python3dist(pytest) < 5.0',
+                        'provide_name': 'python3dist(pytest)',
+                        'new_version': new_version,
+                        'failed_constraint': 'python3dist(pytest) < 5.0',
+                        'already_broken': True
+                    }
+                ]
+            }
+
+        monkeypatch.setattr(FedoraRevDepChecker, '__init__', mock_init)
+        monkeypatch.setattr(FedoraRevDepChecker, 'simulate_version_change', mock_simulate)
+
+        # main() should exit with 0 (no NEW conflicts)
+        main()
+
+        # Check output contains already-broken message
+        captured = capsys.readouterr()
+        assert 'already FTBFS (not a new problem)' in captured.out
+
+    def test_main_exit_code_one_for_mixed_conflicts(self, monkeypatch, mock_dnf_base, capsys):
+        """Test that main() exits with 1 when there are new conflicts mixed with already-broken."""
+        monkeypatch.setattr('sys.argv', ['fedora-revdep-check', 'pytest', '8.0.0'])
+
+        original_init = FedoraRevDepChecker.__init__
+
+        def mock_init(self, verbose=False, base=None, repos=None):
+            original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos)
+
+        # Mock simulate_version_change to return mixed conflicts
+        def mock_simulate(self, srpm_name, new_version):
+            return {
+                'srpm_name': srpm_name,
+                'new_version': new_version,
+                'binary_packages': ['python3-pytest-7.0.0-1.fc40'],
+                'conflicts': [
+                    # New conflict
+                    {
+                        'rdep_package': 'newpkg-1.0.0-1.fc40',
+                        'rdep_source': 'newpkg',
+                        'rdep_arch': 'src',
+                        'requirement': 'python3dist(pytest) < 8.0',
+                        'provide_name': 'python3dist(pytest)',
+                        'new_version': new_version,
+                        'failed_constraint': 'python3dist(pytest) < 8.0',
+                        'already_broken': False
+                    },
+                    # Already broken
+                    {
+                        'rdep_package': 'oldpkg-1.0.0-1.fc40',
+                        'rdep_source': 'oldpkg',
+                        'rdep_arch': 'src',
+                        'requirement': 'python3dist(pytest) < 5.0',
+                        'provide_name': 'python3dist(pytest)',
+                        'new_version': new_version,
+                        'failed_constraint': 'python3dist(pytest) < 5.0',
+                        'already_broken': True
+                    }
+                ]
+            }
+
+        monkeypatch.setattr(FedoraRevDepChecker, '__init__', mock_init)
+        monkeypatch.setattr(FedoraRevDepChecker, 'simulate_version_change', mock_simulate)
+
+        # main() should exit with 1 (NEW conflicts found)
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Check output contains both sections
+        captured = capsys.readouterr()
+        assert 'These packages would FTBFS:' in captured.out
+        assert 'already FTBFS (not a new problem)' in captured.out

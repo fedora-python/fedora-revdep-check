@@ -32,6 +32,7 @@ from tests.fixtures.mock_packages import (  # noqa: E402
     create_bundled_provides_scenario,
     create_multi_binary_scenario,
     create_same_srpm_dependency_scenario,
+    create_already_broken_scenario,
 )
 from fedora_revdep_check import FedoraRevDepChecker  # noqa: E402
 
@@ -111,6 +112,12 @@ def multi_binary_base():
 def same_srpm_dep_base():
     """Provide a mock DNF base with packages from the same SRPM depending on each other."""
     return create_same_srpm_dependency_scenario()
+
+
+@pytest.fixture
+def already_broken_base():
+    """Provide a mock DNF base with already-broken and new conflict scenarios."""
+    return create_already_broken_scenario()
 
 
 @pytest.fixture
