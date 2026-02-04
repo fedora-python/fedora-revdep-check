@@ -39,7 +39,7 @@ fedora-revdep-check python-requests 2.32.0 --repo fedora-40 --repo fedora-40-sou
 
 ## Output
 
-When conflicts are found:
+When conflicts are found, they are categorized into new problems and already-broken packages:
 
 ```
 These packages would FTBFS:
@@ -47,15 +47,25 @@ These packages would FTBFS:
 
 These packages would FTI:
   python3-jupyter-client-8.0.0-1.fc44: python3dist(jupyterlab) >= 4.0, < 4.7
+
+These packages already FTBFS (not a new problem):
+  some-package: python3dist(jupyterlab) < 3.0
+
+These packages already FTI (not a new problem):
+  python3-old-package-1.0.0-1.fc44: python3dist(jupyterlab) < 3.0
 ```
 
 - **FTBFS**: Fail To Build From Source (source packages that won't build)
 - **FTI**: Fail To Install (binary packages that won't install)
 
+The tool distinguishes between:
+- **New problems**: Packages that currently work but would break with the update
+- **Already broken**: Packages that already fail with the current version in repos (not caused by the update)
+
 ## Exit Codes
 
-- `0` - No conflicts detected
-- `1` - Conflicts found or error occurred
+- `0` - No new conflicts detected (already-broken packages don't cause non-zero exit)
+- `1` - New conflicts found or error occurred
 - `130` - Interrupted by user
 
 ## How It Works

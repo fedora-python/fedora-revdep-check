@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Fedora Reverse Dependency Checker
 
@@ -406,6 +407,18 @@ class FedoraRevDepChecker:
         if constraints:
             for constraint in constraints:
                 if not self._version_satisfies(new_version, constraint['op'], constraint['version']):
+                    # New version fails - now check if current version also fails
+                    # to determine if this is a new problem or already broken
+                    current_version_also_fails = False
+
+                    # Get current version from prov_info_list
+                    for pkg, prov_str, prov_version in prov_info_list:
+                        # Use the package version if provide doesn't have its own version
+                        current_ver = prov_version if prov_version else pkg.get_version()
+                        if not self._version_satisfies(current_ver, constraint['op'], constraint['version']):
+                            current_version_also_fails = True
+                            break
+
                     return {
                         'rdep_package': f"{rdep_pkg.get_name()}-{rdep_pkg.get_version()}-{rdep_pkg.get_release()}",
                         'rdep_source': rdep_pkg.get_source_name(),
@@ -413,7 +426,8 @@ class FedoraRevDepChecker:
                         'requirement': req_str,
                         'provide_name': prov_name,
                         'new_version': new_version,
-                        'failed_constraint': f"{prov_name} {constraint['op']} {constraint['version']}"
+                        'failed_constraint': f"{prov_name} {constraint['op']} {constraint['version']}",
+                        'already_broken': current_version_also_fails
                     }
 
         return None
@@ -479,30 +493,58 @@ class FedoraRevDepChecker:
             if self.verbose:
                 print(f"No conflicts detected for {results['srpm_name']} {results['new_version']}")
         else:
-            # Separate conflicts by type
-            ftbfs_conflicts = []
-            fti_conflicts = []
+            # Separate conflicts by type and whether they're new or already broken
+            ftbfs_new = []
+            ftbfs_already_broken = []
+            fti_new = []
+            fti_already_broken = []
 
             for conflict in conflicts:
                 is_source = conflict['rdep_arch'] == 'src'
-                if is_source:
-                    ftbfs_conflicts.append(conflict)
-                else:
-                    fti_conflicts.append(conflict)
+                is_already_broken = conflict.get('already_broken', False)
 
-            # Print FTBFS section
-            if ftbfs_conflicts:
+                if is_source:
+                    if is_already_broken:
+                        ftbfs_already_broken.append(conflict)
+                    else:
+                        ftbfs_new.append(conflict)
+                else:
+                    if is_already_broken:
+                        fti_already_broken.append(conflict)
+                    else:
+                        fti_new.append(conflict)
+
+            # Print new FTBFS conflicts
+            if ftbfs_new:
                 print("These packages would FTBFS:")
-                for conflict in ftbfs_conflicts:
+                for conflict in ftbfs_new:
                     package_name = conflict['rdep_source']
                     print(f"  {package_name}: {conflict['failed_constraint']}")
 
-            # Print FTI section
-            if fti_conflicts:
-                if ftbfs_conflicts:
+            # Print new FTI conflicts
+            if fti_new:
+                if ftbfs_new:
                     print()  # Empty line between sections
                 print("These packages would FTI:")
-                for conflict in fti_conflicts:
+                for conflict in fti_new:
+                    package_name = conflict['rdep_package']
+                    print(f"  {package_name}: {conflict['failed_constraint']}")
+
+            # Print already broken FTBFS packages
+            if ftbfs_already_broken:
+                if ftbfs_new or fti_new:
+                    print()  # Empty line between sections
+                print("These packages already FTBFS (not a new problem):")
+                for conflict in ftbfs_already_broken:
+                    package_name = conflict['rdep_source']
+                    print(f"  {package_name}: {conflict['failed_constraint']}")
+
+            # Print already broken FTI packages
+            if fti_already_broken:
+                if ftbfs_new or fti_new or ftbfs_already_broken:
+                    print()  # Empty line between sections
+                print("These packages already FTI (not a new problem):")
+                for conflict in fti_already_broken:
                     package_name = conflict['rdep_package']
                     print(f"  {package_name}: {conflict['failed_constraint']}")
 
@@ -536,9 +578,15 @@ Examples:
         results = checker.simulate_version_change(args.srpm_name, args.new_version)
         checker.print_results(results)
 
-        # Exit with error code if conflicts found
+        # Exit with error code if NEW conflicts found (not already-broken packages)
         if results.get('conflicts'):
-            sys.exit(1)
+            # Check if there are any new conflicts (not already broken)
+            has_new_conflicts = any(
+                not conflict.get('already_broken', False)
+                for conflict in results['conflicts']
+            )
+            if has_new_conflicts:
+                sys.exit(1)
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user.")

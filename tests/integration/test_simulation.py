@@ -153,3 +153,37 @@ class TestSimulateVersionChange:
         # python3-external-tool requires micropipenv < 1.12, so it should still be satisfied
         # (1.11.0 < 1.12 is True)
         assert len(results['conflicts']) == 0
+
+    def test_simulate_version_change_already_broken_package(self, already_broken_base):
+        """Test that already-broken packages are properly marked."""
+        checker = FedoraRevDepChecker(verbose=False, base=already_broken_base)
+
+        # Upgrading library from 4.0.0 to 5.0.0
+        # old-package requires library < 3.0, so it's already broken with 4.0.0
+        # new-package requires library < 5.0, so it will break with 5.0.0
+        results = checker.simulate_version_change('library', '5.0.0')
+
+        assert 'error' not in results
+        # Should have 4 conflicts: 2 FTBFS (src) + 2 FTI (noarch) for each package
+        assert len(results['conflicts']) == 4
+
+        # Separate conflicts into already broken and new
+        old_pkg_conflicts = []
+        new_pkg_conflicts = []
+        for conflict in results['conflicts']:
+            if 'old-package' in conflict['rdep_source']:
+                old_pkg_conflicts.append(conflict)
+            elif 'new-package' in conflict['rdep_source']:
+                new_pkg_conflicts.append(conflict)
+
+        # old-package should have 2 conflicts (FTBFS and FTI), both already broken
+        assert len(old_pkg_conflicts) == 2
+        for conflict in old_pkg_conflicts:
+            assert conflict['already_broken'] is True
+            assert 'python3dist(library) < 3.0' in conflict['failed_constraint']
+
+        # new-package should have 2 conflicts (FTBFS and FTI), both new problems
+        assert len(new_pkg_conflicts) == 2
+        for conflict in new_pkg_conflicts:
+            assert conflict['already_broken'] is False
+            assert 'python3dist(library) < 5.0' in conflict['failed_constraint']

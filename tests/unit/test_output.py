@@ -233,3 +233,173 @@ class TestPrintResults:
 
         # Check constraint is in output
         assert 'python3dist(pytest) < 8.0' in captured.out
+
+
+    def test_print_results_already_broken_ftbfs(self, checker, capsys):
+        """Test output for already broken FTBFS packages."""
+        results = {
+            'srpm_name': 'pytest',
+            'new_version': '8.0.0',
+            'binary_packages': ['python3-pytest-7.0.0-1.fc40'],
+            'conflicts': [
+                {
+                    'rdep_package': 'tox-4.0.0-1.fc40',
+                    'rdep_source': 'tox',
+                    'rdep_arch': 'src',
+                    'requirement': 'python3dist(pytest) < 5.0',
+                    'provide_name': 'python3dist(pytest)',
+                    'new_version': '8.0.0',
+                    'failed_constraint': 'python3dist(pytest) < 5.0',
+                    'already_broken': True  # Current version also fails
+                }
+            ]
+        }
+
+        checker.print_results(results)
+        captured = capsys.readouterr()
+
+        # Check for already broken FTBFS section
+        assert 'These packages already FTBFS (not a new problem):' in captured.out
+        assert 'tox' in captured.out
+        assert 'python3dist(pytest) < 5.0' in captured.out
+        # Should NOT appear in new FTBFS section
+        assert 'These packages would FTBFS:' not in captured.out
+
+
+    def test_print_results_already_broken_fti(self, checker, capsys):
+        """Test output for already broken FTI packages."""
+        results = {
+            'srpm_name': 'pytest',
+            'new_version': '8.0.0',
+            'binary_packages': ['python3-pytest-7.0.0-1.fc40'],
+            'conflicts': [
+                {
+                    'rdep_package': 'python3-tox-4.0.0-1.fc40',
+                    'rdep_source': 'tox',
+                    'rdep_arch': 'noarch',
+                    'requirement': 'python3dist(pytest) < 5.0',
+                    'provide_name': 'python3dist(pytest)',
+                    'new_version': '8.0.0',
+                    'failed_constraint': 'python3dist(pytest) < 5.0',
+                    'already_broken': True  # Current version also fails
+                }
+            ]
+        }
+
+        checker.print_results(results)
+        captured = capsys.readouterr()
+
+        # Check for already broken FTI section
+        assert 'These packages already FTI (not a new problem):' in captured.out
+        assert 'python3-tox-4.0.0-1.fc40' in captured.out
+        assert 'python3dist(pytest) < 5.0' in captured.out
+        # Should NOT appear in new FTI section
+        assert 'These packages would FTI:' not in captured.out
+
+
+    def test_print_results_mixed_new_and_already_broken(self, checker, capsys):
+        """Test output with both new conflicts and already broken packages."""
+        results = {
+            'srpm_name': 'pytest',
+            'new_version': '8.0.0',
+            'binary_packages': ['python3-pytest-7.0.0-1.fc40'],
+            'conflicts': [
+                # New FTBFS problem
+                {
+                    'rdep_package': 'newpkg-1.0.0-1.fc40',
+                    'rdep_source': 'newpkg',
+                    'rdep_arch': 'src',
+                    'requirement': 'python3dist(pytest) < 8.0',
+                    'provide_name': 'python3dist(pytest)',
+                    'new_version': '8.0.0',
+                    'failed_constraint': 'python3dist(pytest) < 8.0',
+                    'already_broken': False  # New problem
+                },
+                # Already broken FTBFS
+                {
+                    'rdep_package': 'oldpkg-1.0.0-1.fc40',
+                    'rdep_source': 'oldpkg',
+                    'rdep_arch': 'src',
+                    'requirement': 'python3dist(pytest) < 5.0',
+                    'provide_name': 'python3dist(pytest)',
+                    'new_version': '8.0.0',
+                    'failed_constraint': 'python3dist(pytest) < 5.0',
+                    'already_broken': True
+                },
+                # New FTI problem
+                {
+                    'rdep_package': 'python3-newpkg2-1.0.0-1.fc40',
+                    'rdep_source': 'newpkg2',
+                    'rdep_arch': 'noarch',
+                    'requirement': 'python3dist(pytest) < 8.0',
+                    'provide_name': 'python3dist(pytest)',
+                    'new_version': '8.0.0',
+                    'failed_constraint': 'python3dist(pytest) < 8.0',
+                    'already_broken': False
+                },
+                # Already broken FTI
+                {
+                    'rdep_package': 'python3-oldpkg2-1.0.0-1.fc40',
+                    'rdep_source': 'oldpkg2',
+                    'rdep_arch': 'noarch',
+                    'requirement': 'python3dist(pytest) < 5.0',
+                    'provide_name': 'python3dist(pytest)',
+                    'new_version': '8.0.0',
+                    'failed_constraint': 'python3dist(pytest) < 5.0',
+                    'already_broken': True
+                }
+            ]
+        }
+
+        checker.print_results(results)
+        captured = capsys.readouterr()
+
+        # Check all four sections appear
+        assert 'These packages would FTBFS:' in captured.out
+        assert 'These packages would FTI:' in captured.out
+        assert 'These packages already FTBFS (not a new problem):' in captured.out
+        assert 'These packages already FTI (not a new problem):' in captured.out
+
+        # Check new problems
+        assert 'newpkg' in captured.out
+        assert 'python3-newpkg2-1.0.0-1.fc40' in captured.out
+
+        # Check already broken
+        assert 'oldpkg' in captured.out
+        assert 'python3-oldpkg2-1.0.0-1.fc40' in captured.out
+
+        # Check constraints
+        assert 'python3dist(pytest) < 8.0' in captured.out
+        assert 'python3dist(pytest) < 5.0' in captured.out
+
+
+    def test_print_results_only_already_broken(self, checker, capsys):
+        """Test output with only already broken packages (no new problems)."""
+        results = {
+            'srpm_name': 'pytest',
+            'new_version': '8.0.0',
+            'binary_packages': ['python3-pytest-7.0.0-1.fc40'],
+            'conflicts': [
+                {
+                    'rdep_package': 'oldpkg-1.0.0-1.fc40',
+                    'rdep_source': 'oldpkg',
+                    'rdep_arch': 'src',
+                    'requirement': 'python3dist(pytest) < 5.0',
+                    'provide_name': 'python3dist(pytest)',
+                    'new_version': '8.0.0',
+                    'failed_constraint': 'python3dist(pytest) < 5.0',
+                    'already_broken': True
+                }
+            ]
+        }
+
+        checker.print_results(results)
+        captured = capsys.readouterr()
+
+        # Should only show already broken section
+        assert 'These packages already FTBFS (not a new problem):' in captured.out
+        assert 'oldpkg' in captured.out
+
+        # Should NOT show new problem sections
+        assert 'These packages would FTBFS:' not in captured.out
+        assert 'These packages would FTI:' not in captured.out
