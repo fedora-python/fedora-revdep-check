@@ -150,9 +150,6 @@ class TestFullWorkflow:
         def mock_init(self, verbose=False, base=None, repos=None):
             original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos)
 
-        # Mock simulate_version_change to return only already-broken conflicts
-        original_simulate = FedoraRevDepChecker.simulate_version_change
-
         def mock_simulate(self, srpm_name, new_version):
             return {
                 'srpm_name': srpm_name,
