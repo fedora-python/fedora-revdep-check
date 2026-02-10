@@ -246,6 +246,8 @@ class MockBase:
         self._repos = repos or [
             MockRepo('rawhide'),
             MockRepo('rawhide-source'),
+            MockRepo('koji'),
+            MockRepo('koji-source'),
         ]
         self._vars = MockVars()
         self._repo_sack = MockRepoSack(self._repos)

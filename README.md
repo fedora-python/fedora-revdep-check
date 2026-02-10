@@ -35,7 +35,7 @@ fedora-revdep-check python-requests 2.32.0 --repo fedora-40 --repo fedora-40-sou
 ### Options
 
 - `-v, --verbose` - Show detailed analysis
-- `-r, --repo <repo-id>` - Repository to enable (can be specified multiple times, default: rawhide + rawhide-source)
+- `-r, --repo <repo-id>` - Repository to enable (can be specified multiple times, default: rawhide, rawhide-source, koji, and koji-source)
 
 ## Output
 
