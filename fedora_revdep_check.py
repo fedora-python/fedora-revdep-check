@@ -43,13 +43,70 @@ class FedoraRevDepChecker:
         Args:
             verbose: Enable verbose output
             base: Optional DNF base object for testing (if None, creates real DNF base)
-            repos: List of repository IDs to enable (default: ['rawhide', 'rawhide-source'])
+            repos: List of repository IDs to enable (default: ['rawhide', 'rawhide-source', 'koji', 'koji-source'])
         """
         self.verbose = verbose
         self.base = base
-        self.repos = repos if repos is not None else ['rawhide', 'rawhide-source']
+        self.repos = repos if repos is not None else ['rawhide', 'rawhide-source', 'koji', 'koji-source']
         if self.base is None:
             self._init_dnf()
+
+    def _get_known_repo_config(self, repo_id: str, releasever: str):
+        """Get known repository configuration for common Fedora repos.
+
+        Args:
+            repo_id: Repository ID to configure
+            releasever: Release version string
+
+        Returns:
+            Dictionary with 'metalink' or 'baseurl' key, or None if repo is not known
+        """
+        import re
+
+        # Known repository configurations
+        configs = {
+            'rawhide': {
+                'metalink': 'https://mirrors.fedoraproject.org/metalink?repo=rawhide&arch=$basearch'
+            },
+            'rawhide-source': {
+                'metalink': 'https://mirrors.fedoraproject.org/metalink?repo=rawhide-source&arch=$basearch'
+            },
+            'koji': {
+                'baseurl': 'https://kojipkgs.fedoraproject.org/repos/rawhide/latest/$basearch/'
+            },
+            'koji-source': {
+                'baseurl': 'https://kojipkgs.fedoraproject.org/repos/rawhide/latest/src/'
+            },
+            'fedora': {
+                'metalink': f'https://mirrors.fedoraproject.org/metalink?repo=fedora-{releasever}&arch=$basearch'
+            },
+            'fedora-source': {
+                'metalink': f'https://mirrors.fedoraproject.org/metalink?repo=fedora-source-{releasever}&arch=$basearch'
+            },
+        }
+
+        # Check exact match first
+        if repo_id in configs:
+            return configs[repo_id]
+
+        # Pattern-based repository configurations
+        # Each tuple: (regex_pattern, metalink_repo_template)
+        patterns = [
+            (r'^f(\d+)$', 'fedora-{version}'),
+            (r'^f(\d+)-source$', 'fedora-source-{version}'),
+            (r'^fedora-(\d+)$', 'fedora-{version}'),
+            (r'^fedora-(\d+)-source$', 'fedora-source-{version}'),
+        ]
+
+        for pattern, repo_template in patterns:
+            match = re.match(pattern, repo_id)
+            if match:
+                version = match.group(1)
+                return {
+                    'metalink': f'https://mirrors.fedoraproject.org/metalink?repo={repo_template.format(version=version)}&arch=$basearch'
+                }
+
+        return None
 
     def _init_dnf(self):
         """Initialize DNF 5 base and load repository metadata."""
@@ -86,7 +143,11 @@ class FedoraRevDepChecker:
         for repo in repo_query:
             repo.disable()
 
-        # Enable specified repositories
+        # Track which repos were found in system config and which were created
+        repos_from_config = set()
+        repos_created = []
+
+        # Enable specified repositories, create them if not found
         enabled_count = 0
 
         for repo_id in self.repos:
@@ -99,16 +160,52 @@ class FedoraRevDepChecker:
                 repo.enable()
                 enabled_count += 1
                 found = True
+                repos_from_config.add(repo_id)
                 if self.verbose:
                     print(f"  Enabled repo: {repo_id}")
 
-            if not found and self.verbose:
-                print(f"  Warning: Repository '{repo_id}' not found in configuration")
+            # If not found in system config, try to create it if we know the configuration
+            if not found:
+                repo_config = self._get_known_repo_config(repo_id, releasever)
+                if repo_config:
+                    try:
+                        # Create the repository programmatically
+                        repo = repo_sack.create_repo(repo_id)
+
+                        # Configure the repository
+                        config = repo.get_config()
+                        if 'metalink' in repo_config:
+                            config.metalink().set(libdnf5.conf.Option.Priority_RUNTIME, repo_config['metalink'])
+                        elif 'baseurl' in repo_config:
+                            config.baseurl = repo_config['baseurl']
+
+                        # Disable GPG check for auto-created repos (following koji.repo pattern)
+                        config.pkg_gpgcheck = "0"
+
+                        # Enable the repo
+                        repo.enable()
+                        enabled_count += 1
+                        repos_created.append(repo_id)
+
+                        if self.verbose:
+                            print(f"  Created and enabled repo: {repo_id} (using default configuration)")
+                    except Exception as e:
+                        if self.verbose:
+                            import traceback
+                            print(traceback.format_exc())
+                            print(f"  Warning: Failed to create repository '{repo_id}': {e}")
+                elif self.verbose:
+                    print(f"  Warning: Repository '{repo_id}' not found in configuration and no default available")
+
+        # Show warning if any repos were auto-created
+        if repos_created:
+            print(f"Warning: Using default configuration for repositories: {', '.join(repos_created)}")
+            print("         Consider installing the repository configuration in /etc/yum.repos.d/")
 
         if enabled_count == 0:
             raise RuntimeError(
                 f"Failed to enable any repositories from: {', '.join(self.repos)}. "
-                "Please ensure the repositories are configured in /etc/yum.repos.d/"
+                "Please ensure the repositories are configured in /etc/yum.repos.d/ or use known repository IDs."
             )
 
         if self.verbose:
@@ -591,7 +688,8 @@ Examples:
                         help='Enable verbose output')
     parser.add_argument('-r', '--repo', action='append', dest='repos',
                         help='Repository ID to enable (can be specified multiple times). '
-                             'Default: rawhide and rawhide-source')
+                             'Default: rawhide, rawhide-source, koji, and koji-source. '
+                             'Known repositories will be auto-configured if not in /etc/yum.repos.d/')
 
     args = parser.parse_args()
 
