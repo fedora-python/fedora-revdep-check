@@ -198,7 +198,7 @@ class FedoraRevDepChecker:
                     print(f"  Warning: Repository '{repo_id}' not found in configuration and no default available")
 
         # Show warning if any repos were auto-created
-        if repos_created:
+        if repos_created and self.verbose:
             print(f"Warning: Using default configuration for repositories: {', '.join(repos_created)}")
             print("         Consider installing the repository configuration in /etc/yum.repos.d/")
 
