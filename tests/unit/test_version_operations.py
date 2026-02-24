@@ -138,6 +138,18 @@ class TestVersionSatisfies:
 
 
     @pytest.mark.parametrize("version,op,required,expected", [
+        # Test that new version without epoch is correctly compared
+        # to requirements with epoch (after epoch is inherited)
+        ("1:9.1.0", ">=", "1:8.2.0", True),  # Should satisfy after inheriting epoch 1
+        ("1:9.1.0", ">=", "8.2.0", True),    # Epoch 1 > epoch 0
+    ])
+    def test_version_satisfies_inherited_epoch(self, checker, version, op, required, expected):
+        """Test version comparison when epoch is inherited from current package."""
+        result = checker._version_satisfies(version, op, required)
+        assert result == expected, f"{version} {op} {required} should be {expected}"
+
+
+    @pytest.mark.parametrize("version,op,required,expected", [
         # Double tilde (very pre-release)
         ("4.7.0~~alpha", "<", "4.7.0~beta", True),
         ("4.7.0~~", "<", "4.7.0~", True),

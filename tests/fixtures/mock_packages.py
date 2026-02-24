@@ -613,3 +613,97 @@ def create_already_broken_scenario():
     ]
 
     return MockBase(packages=packages)
+
+
+def create_epoch_package_scenario():
+    """
+    Create a scenario with packages that have epochs.
+
+    Scenario:
+    - sphinx 1:8.0.0 currently installed (epoch 1)
+    - reverse-dep requires sphinx >= 1:8.0.0
+    - Upgrading to 9.0.0 without specifying epoch should inherit epoch 1
+    - So 1:9.0.0 should satisfy the requirement (not 0:9.0.0 which would fail)
+    """
+    packages = [
+        # Sphinx package with epoch 1
+        MockPackage(
+            name='python3-sphinx',
+            version='8.0.0',
+            release='1.fc40',
+            arch='noarch',
+            source_name='sphinx',
+            epoch='1',
+            provides=[
+                'python3-sphinx',
+                'python3-sphinx = 1:8.0.0-1.fc40',
+                'python3dist(sphinx) = 8.0.0',
+            ]
+        ),
+        # Reverse dependency requiring >= 1:8.0.0
+        MockPackage(
+            name='python3-docs',
+            version='1.0.0',
+            release='1.fc40',
+            arch='noarch',
+            source_name='python-docs',
+            requires=[
+                'python3-sphinx >= 1:8.0.0',
+            ]
+        ),
+    ]
+
+    return MockBase(packages=packages)
+
+
+def create_epoch_with_dist_provides_scenario():
+    """
+    Create a scenario with packages that have both RPM and dist provides.
+
+    Scenario:
+    - sphinx 1:8.0.0 currently installed (epoch 1)
+    - Provides both python3-sphinx (with epoch) and python3dist(sphinx) (without epoch)
+    - reverse-dep-rpm requires python3-sphinx >= 1:8.0.0 (RPM provide with epoch)
+    - reverse-dep-dist requires python3dist(sphinx) < 10~~ (dist provide without epoch)
+    - Upgrading to 9.1.0 should satisfy both (use epoch for RPM, not for dist)
+    """
+    packages = [
+        # Sphinx package with epoch 1
+        MockPackage(
+            name='python3-sphinx',
+            version='8.0.0',
+            release='1.fc40',
+            arch='noarch',
+            source_name='sphinx',
+            epoch='1',
+            provides=[
+                'python3-sphinx',
+                'python3-sphinx = 1:8.0.0-1.fc40',
+                'python3dist(sphinx) = 8.0.0',
+            ]
+        ),
+        # Reverse dependency requiring RPM package with epoch
+        MockPackage(
+            name='python3-docs',
+            version='1.0.0',
+            release='1.fc40',
+            arch='noarch',
+            source_name='python-docs',
+            requires=[
+                'python3-sphinx >= 1:8.0.0',
+            ]
+        ),
+        # Reverse dependency requiring dist provide without epoch
+        MockPackage(
+            name='python3-myst-parser',
+            version='5.0.0',
+            release='1.fc40',
+            arch='noarch',
+            source_name='python-myst-parser',
+            requires=[
+                'python3dist(sphinx) < 10~~',
+            ]
+        ),
+    ]
+
+    return MockBase(packages=packages)
