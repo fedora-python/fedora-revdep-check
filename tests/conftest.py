@@ -33,6 +33,8 @@ from tests.fixtures.mock_packages import (  # noqa: E402
     create_multi_binary_scenario,
     create_same_srpm_dependency_scenario,
     create_already_broken_scenario,
+    create_epoch_package_scenario,
+    create_epoch_with_dist_provides_scenario,
 )
 from fedora_revdep_check import FedoraRevDepChecker  # noqa: E402
 
@@ -118,6 +120,18 @@ def same_srpm_dep_base():
 def already_broken_base():
     """Provide a mock DNF base with already-broken and new conflict scenarios."""
     return create_already_broken_scenario()
+
+
+@pytest.fixture
+def epoch_package_base():
+    """Provide a mock DNF base with packages that have epochs."""
+    return create_epoch_package_scenario()
+
+
+@pytest.fixture
+def epoch_with_dist_provides_base():
+    """Provide a mock DNF base with packages that have both RPM and dist provides."""
+    return create_epoch_with_dist_provides_scenario()
 
 
 @pytest.fixture

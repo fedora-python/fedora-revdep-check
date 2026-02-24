@@ -187,3 +187,40 @@ class TestSimulateVersionChange:
         for conflict in new_pkg_conflicts:
             assert conflict['already_broken'] is False
             assert 'python3dist(library) < 5.0' in conflict['failed_constraint']
+
+    def test_simulate_version_change_inherits_epoch(self, epoch_package_base):
+        """Test that new version without epoch inherits epoch from current package."""
+        checker = FedoraRevDepChecker(verbose=False, base=epoch_package_base)
+
+        # Current package is 1:8.0.0, upgrading to 9.0.0 (without epoch)
+        # should be interpreted as 1:9.0.0, not 0:9.0.0
+        # reverse-dep requires >= 1:8.0.0, so 1:9.0.0 should satisfy it
+        results = checker.simulate_version_change('sphinx', '9.0.0')
+
+        assert 'error' not in results
+        # The new_version should be transformed to include epoch
+        assert results['new_version'] == '1:9.0.0'
+
+        # Should have no conflicts (1:9.0.0 >= 1:8.0.0)
+        assert len(results['conflicts']) == 0
+
+    def test_simulate_version_change_epoch_only_for_rpm_provides(self, epoch_with_dist_provides_base):
+        """Test that epoch is only used for RPM provides, not for dist provides."""
+        checker = FedoraRevDepChecker(verbose=False, base=epoch_with_dist_provides_base)
+
+        # Current package is 1:8.0.0 with both RPM and dist provides
+        # Upgrading to 9.1.0 should:
+        # - Use 1:9.1.0 for RPM package provides (with epoch)
+        # - Use 9.1.0 for dist provides (without epoch)
+        # reverse-dep-rpm requires python3-sphinx >= 1:8.0.0 (should be satisfied)
+        # reverse-dep-dist requires python3dist(sphinx) < 10~~ (should be satisfied)
+        results = checker.simulate_version_change('sphinx', '9.1.0')
+
+        assert 'error' not in results
+        assert results['new_version'] == '1:9.1.0'
+
+        # Should have no conflicts
+        # Both requirements should be satisfied:
+        # - 1:9.1.0 >= 1:8.0.0 (True)
+        # - 9.1.0 < 10~~ (True)
+        assert len(results['conflicts']) == 0

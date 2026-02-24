@@ -228,6 +228,16 @@ class FedoraRevDepChecker:
                 'binary_packages': []
             }
 
+        # If new_version doesn't include an epoch, inherit it from current packages
+        if ':' not in new_version:
+            # Get epoch from first package (all packages from same SRPM should have same epoch)
+            current_epoch = binary_packages[0].get_epoch()
+            if current_epoch and current_epoch != '0':
+                new_version = f"{current_epoch}:{new_version}"
+                if self.verbose:
+                    print(f"No epoch specified in new version, using epoch {current_epoch} from current package")
+                    print(f"Testing with version: {new_version}\n")
+
         if self.verbose:
             print(f"Found {len(binary_packages)} binary package(s) from {srpm_name}:")
             for pkg in binary_packages:
@@ -406,7 +416,19 @@ class FedoraRevDepChecker:
         # Check if new version satisfies all constraints
         if constraints:
             for constraint in constraints:
-                if not self._version_satisfies(new_version, constraint['op'], constraint['version']):
+                # Determine which new version to use based on whether the provide uses epochs
+                # Check if any current provide has an epoch in its version
+                provide_uses_epoch = False
+                for pkg, prov_str, prov_version in prov_info_list:
+                    current_ver = prov_version if prov_version else pkg.get_version()
+                    if ':' in current_ver:
+                        provide_uses_epoch = True
+                        break
+
+                # Use appropriate version: with or without epoch depending on provide format
+                version_to_check = new_version if provide_uses_epoch else new_version.split(':', 1)[-1]
+
+                if not self._version_satisfies(version_to_check, constraint['op'], constraint['version']):
                     # New version fails - now check if current version also fails
                     # to determine if this is a new problem or already broken
                     current_version_also_fails = False
