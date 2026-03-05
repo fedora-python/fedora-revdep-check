@@ -6,16 +6,21 @@ Checks if updating a package to a new version will break any reverse dependencie
 in Fedora rawhide. Uses DNF Python bindings with cached repository data.
 
 Usage:
-    fedora-revdep-check <srpm-name> <new-version>
+    fedora-revdep-check --rpms /path/to/build/*.rpm
+    fedora-revdep-check --rpm-dir /path/to/build/
+    fedora-revdep-check <srpm-name> <new-version>  # Legacy mode
 
 Example:
-    fedora-revdep-check jupyterlab 4.7.0
+    fedora-revdep-check --rpms ~/rpmbuild/RPMS/noarch/*.rpm
+    fedora-revdep-check jupyterlab 4.7.0  # Legacy
 """
 
 import sys
 import re
 import argparse
 import operator
+import os
+import glob
 from collections import defaultdict
 from typing import Dict, List, Tuple
 import libdnf5
@@ -295,6 +300,126 @@ class FedoraRevDepChecker:
 
         return provides
 
+    def read_rpm_provides(self, rpm_files: List[str]) -> Dict:
+        """
+        Read provides from RPM files.
+
+        Args:
+            rpm_files: List of paths to RPM files
+
+        Returns:
+            Dictionary with:
+                - srpm_name: Source package name
+                - provides: Dict mapping provide name to list of (rpm_file, version, full_provide_string)
+                - rpm_info: Dict mapping rpm_file to metadata (name, epoch, version, release, arch)
+        """
+        if self.verbose:
+            print(f"Reading {len(rpm_files)} RPM file(s)...\n")
+
+        ts = rpm.TransactionSet()
+        ts.setVSFlags(rpm._RPMVSF_NOSIGNATURES | rpm._RPMVSF_NODIGESTS)
+
+        provides_map = defaultdict(list)
+        rpm_info = {}
+        srpm_names = set()
+
+        for rpm_file in rpm_files:
+            if not os.path.exists(rpm_file):
+                raise FileNotFoundError(f"RPM file not found: {rpm_file}")
+
+            try:
+                with open(rpm_file, 'rb') as f:
+                    hdr = ts.hdrFromFdno(f.fileno())
+
+                name = hdr[rpm.RPMTAG_NAME].decode() if isinstance(hdr[rpm.RPMTAG_NAME], bytes) else hdr[rpm.RPMTAG_NAME]
+                epoch = hdr[rpm.RPMTAG_EPOCH] if hdr[rpm.RPMTAG_EPOCH] is not None else 0
+                version = hdr[rpm.RPMTAG_VERSION].decode() if isinstance(hdr[rpm.RPMTAG_VERSION], bytes) else hdr[rpm.RPMTAG_VERSION]
+                release = hdr[rpm.RPMTAG_RELEASE].decode() if isinstance(hdr[rpm.RPMTAG_RELEASE], bytes) else hdr[rpm.RPMTAG_RELEASE]
+                arch = hdr[rpm.RPMTAG_ARCH].decode() if isinstance(hdr[rpm.RPMTAG_ARCH], bytes) else hdr[rpm.RPMTAG_ARCH]
+                sourcerpm = hdr[rpm.RPMTAG_SOURCERPM]
+                if sourcerpm:
+                    sourcerpm = sourcerpm.decode() if isinstance(sourcerpm, bytes) else sourcerpm
+
+                # Extract SRPM name from SOURCERPM tag
+                if sourcerpm:
+                    # Format is typically: name-version-release.src.rpm
+                    srpm_name = sourcerpm.rsplit('-', 2)[0]
+                    srpm_names.add(srpm_name)
+                else:
+                    # This is a source RPM
+                    srpm_names.add(name)
+
+                # Skip source RPMs for provides
+                if arch == 'src':
+                    if self.verbose:
+                        print(f"Skipping source RPM: {name}-{version}-{release}.{arch}")
+                    continue
+
+                rpm_info[rpm_file] = {
+                    'name': name,
+                    'epoch': epoch,
+                    'version': version,
+                    'release': release,
+                    'arch': arch,
+                    'evr': f"{epoch}:{version}-{release}" if epoch else f"{version}-{release}"
+                }
+
+                if self.verbose:
+                    print(f"Reading {name}-{epoch}:{version}-{release}.{arch}")
+
+                # Extract provides
+                provides_names = hdr[rpm.RPMTAG_PROVIDENAME]
+                provides_flags = hdr[rpm.RPMTAG_PROVIDEFLAGS]
+                provides_versions = hdr[rpm.RPMTAG_PROVIDEVERSION]
+
+                if provides_names:
+                    for i, prov_name in enumerate(provides_names):
+                        prov_name = prov_name.decode() if isinstance(prov_name, bytes) else prov_name
+
+                        # Skip bundled provides
+                        if prov_name.startswith('bundled('):
+                            continue
+
+                        prov_version = None
+                        full_provide = prov_name
+
+                        # Check if there's a version
+                        if provides_versions and i < len(provides_versions) and provides_versions[i]:
+                            prov_version = provides_versions[i].decode() if isinstance(provides_versions[i], bytes) else provides_versions[i]
+
+                            # Get the operator if flags are set
+                            if provides_flags and i < len(provides_flags):
+                                flags = provides_flags[i]
+                                if flags & rpm.RPMSENSE_EQUAL:
+                                    full_provide = f"{prov_name} = {prov_version}"
+                                elif flags & rpm.RPMSENSE_GREATER:
+                                    full_provide = f"{prov_name} > {prov_version}"
+                                elif flags & rpm.RPMSENSE_LESS:
+                                    full_provide = f"{prov_name} < {prov_version}"
+                                else:
+                                    full_provide = f"{prov_name} = {prov_version}"
+
+                        provides_map[prov_name].append((rpm_file, prov_version, full_provide))
+
+            except Exception as e:
+                raise RuntimeError(f"Failed to read RPM file {rpm_file}: {e}")
+
+        if len(srpm_names) == 0:
+            raise ValueError("Could not determine source package name from RPM files")
+        elif len(srpm_names) > 1:
+            raise ValueError(f"RPM files come from multiple source packages: {', '.join(srpm_names)}")
+
+        srpm_name = srpm_names.pop()
+
+        if self.verbose:
+            print(f"\nFound {len(provides_map)} unique provides (excluding bundled)\n")
+
+        return {
+            'srpm_name': srpm_name,
+            'provides': provides_map,
+            'rpm_info': rpm_info
+        }
+
     def find_reverse_dependencies(self, provide_name: str) -> List[libdnf5.rpm.Package]:
         """Find all packages that require the given provide."""
         query = libdnf5.rpm.PackageQuery(self.base)
@@ -412,6 +537,145 @@ class FedoraRevDepChecker:
             'srpm_name': srpm_name,
             'new_version': new_version,
             'binary_packages': [f"{pkg.get_name()}-{pkg.get_version()}-{pkg.get_release()}" for pkg in binary_packages],
+            'conflicts': conflicts
+        }
+
+    def check_rpm_files(self, rpm_files: List[str]) -> Dict:
+        """
+        Check if RPM files would break reverse dependencies.
+
+        Args:
+            rpm_files: List of paths to RPM files to check
+
+        Returns:
+            Dictionary with conflict information (same format as simulate_version_change)
+        """
+        # Read provides from RPM files
+        rpm_data = self.read_rpm_provides(rpm_files)
+        srpm_name = rpm_data['srpm_name']
+        provides_map = rpm_data['provides']
+        rpm_info = rpm_data['rpm_info']
+
+        if self.verbose:
+            print(f"Checking reverse dependencies for {srpm_name}...\n")
+
+        # Get current packages from repository for comparison
+        current_packages = self.get_binary_packages(srpm_name)
+
+        # Build a map of current provides and their versions for "already broken" detection
+        current_provides_map = {}
+        for pkg in current_packages:
+            for prov_name, prov_version, prov_str in self.get_provides(pkg):
+                if prov_name not in current_provides_map:
+                    current_provides_map[prov_name] = []
+                # Note: Order must match what _check_requirement_conflict expects: (pkg, prov_str, prov_version)
+                current_provides_map[prov_name].append((pkg, prov_str, prov_version))
+
+        conflicts = []
+
+        # Track checked requirements to avoid duplicates
+        checked_requirements = set()
+
+        # Check each provide from the RPM files
+        for prov_name, prov_instances in provides_map.items():
+            if self.verbose:
+                print(f"Checking provide '{prov_name}'")
+
+            # Get the version from the first instance (they should all be the same build)
+            # prov_instances is a list of (rpm_file, prov_version, full_provide) tuples
+            rpm_file = prov_instances[0][0] if prov_instances else None
+            prov_version = prov_instances[0][1] if prov_instances and prov_instances[0][1] else None
+
+            # Determine the new version to use
+            # For provides that include RPM package names (like python3-sphinx),
+            # we should use the full EVR with epoch
+            # For dist provides (like python3dist(sphinx)), we use just the version without epoch
+            if ':' in prov_version if prov_version else False:
+                # Version already has epoch
+                new_version = prov_version
+            elif rpm_file and rpm_file in rpm_info:
+                # Check if this is a package name provide or dist provide
+                rpm_name = rpm_info[rpm_file]['name']
+                if prov_name == rpm_name or prov_name.startswith(f"{rpm_name}("):
+                    # Package name provide - use full EVR with epoch
+                    new_version = rpm_info[rpm_file]['evr']
+                else:
+                    # Dist provide - use version without epoch
+                    new_version = prov_version if prov_version else rpm_info[rpm_file]['version']
+            else:
+                new_version = prov_version
+
+            if not new_version:
+                if self.verbose:
+                    print(f"  Warning: No version found for provide '{prov_name}', skipping")
+                continue
+
+            # Find packages that require this provide
+            rdeps = self.find_reverse_dependencies(prov_name)
+
+            if self.verbose:
+                print(f"  Found {len(rdeps)} reverse dependencies")
+
+            # Get current provides for "already broken" detection
+            current_prov_info = current_provides_map.get(prov_name, [])
+
+            # Check each reverse dependency
+            for rdep_pkg in rdeps:
+                # Skip packages from the same SRPM (they'll be updated together)
+                if rdep_pkg.get_source_name() == srpm_name:
+                    if self.verbose:
+                        print(f"  Skipping {rdep_pkg.get_name()} (same SRPM)")
+                    continue
+
+                pkg_key = f"{rdep_pkg.get_name()}-{rdep_pkg.get_version()}-{rdep_pkg.get_release()}"
+
+                # Check requirements against the new provides
+                for req in rdep_pkg.get_requires():
+                    req_str = req.to_string()
+
+                    # Check if this requirement matches the provide we're testing
+                    if not self._requirement_matches_provide(req_str, prov_name):
+                        continue
+
+                    # Avoid checking the same requirement multiple times
+                    check_key = (pkg_key, req_str)
+                    if check_key in checked_requirements:
+                        continue
+                    checked_requirements.add(check_key)
+
+                    if self.verbose:
+                        print(f"  Checking: {rdep_pkg.get_name()} requires {req_str}")
+
+                    # Check if requirement would be satisfied by the new version
+                    conflict = self._check_requirement_conflict(
+                        req_str, prov_name, new_version, rdep_pkg, current_prov_info
+                    )
+
+                    if conflict:
+                        conflicts.append(conflict)
+                        if self.verbose:
+                            print(f"    -> CONFLICT: {conflict['failed_constraint']}")
+
+        # Prepare binary package list from RPM info
+        binary_packages = [
+            f"{info['name']}-{info['evr']}.{info['arch']}"
+            for info in rpm_info.values()
+        ]
+
+        # Determine a representative version for the result
+        # Use the EVR from the first RPM (they should all be from the same build)
+        new_version = list(rpm_info.values())[0]['evr'] if rpm_info else "unknown"
+
+        if self.verbose:
+            if conflicts:
+                print(f"\nFound {len(conflicts)} conflict(s)")
+            else:
+                print("\nNo conflicts detected")
+
+        return {
+            'srpm_name': srpm_name,
+            'new_version': new_version,
+            'binary_packages': binary_packages,
             'conflicts': conflicts
         }
 
@@ -534,7 +798,9 @@ class FedoraRevDepChecker:
                     for pkg, prov_str, prov_version in prov_info_list:
                         # Use the package version if provide doesn't have its own version
                         current_ver = prov_version if prov_version else pkg.get_version()
-                        if not self._version_satisfies(current_ver, constraint['op'], constraint['version']):
+                        # Strip epoch for dist provides, just like we do for new_version
+                        current_ver_to_check = current_ver if provide_uses_epoch else current_ver.split(':', 1)[-1]
+                        if not self._version_satisfies(current_ver_to_check, constraint['op'], constraint['version']):
                             current_version_also_fails = True
                             break
 
@@ -675,16 +941,23 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Check RPM files from a build
+  %(prog)s --rpms ~/rpmbuild/RPMS/noarch/*.rpm
+  %(prog)s --rpm-dir ~/rpmbuild/RPMS/noarch/
+
+  # Legacy mode (simulates a version change)
   %(prog)s jupyterlab 4.7.0
   %(prog)s python-requests 2.32.0 --verbose
-  %(prog)s pytest 8.0.0 --repo fedora --repo fedora-source
-  %(prog)s numpy 2.0.0 --repo fedora-40 --repo fedora-40-source
   %(prog)s pytest 8.0.0 --releasever 44
         """
     )
 
-    parser.add_argument('srpm_name', help='Source package name (SRPM)')
-    parser.add_argument('new_version', help='New version to test')
+    parser.add_argument('srpm_name', nargs='?', help='Source package name (SRPM) - legacy mode')
+    parser.add_argument('new_version', nargs='?', help='New version to test - legacy mode')
+    parser.add_argument('--rpms', nargs='+', metavar='FILE',
+                        help='RPM file(s) to check')
+    parser.add_argument('--rpm-dir', metavar='DIR',
+                        help='Directory containing RPM files to check')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Enable verbose output')
     parser.add_argument('-r', '--repo', action='append', dest='repos',
@@ -697,9 +970,37 @@ Examples:
 
     args = parser.parse_args()
 
+    # Determine mode: RPM files or legacy SRPM name + version
+    rpm_files = []
+
+    if args.rpms:
+        # Use specified RPM files
+        rpm_files = args.rpms
+    elif args.rpm_dir:
+        # Find all .rpm files in the directory
+        if not os.path.isdir(args.rpm_dir):
+            print(f"ERROR: Directory not found: {args.rpm_dir}", file=sys.stderr)
+            sys.exit(1)
+        rpm_files = glob.glob(os.path.join(args.rpm_dir, "*.rpm"))
+        if not rpm_files:
+            print(f"ERROR: No .rpm files found in {args.rpm_dir}", file=sys.stderr)
+            sys.exit(1)
+    elif args.srpm_name and args.new_version:
+        # Legacy mode: SRPM name + version
+        pass
+    else:
+        parser.error("Either specify --rpms/--rpm-dir, or provide srpm_name and new_version")
+
     try:
         checker = FedoraRevDepChecker(verbose=args.verbose, repos=args.repos, releasever=args.releasever)
-        results = checker.simulate_version_change(args.srpm_name, args.new_version)
+
+        if rpm_files:
+            # RPM file mode
+            results = checker.check_rpm_files(rpm_files)
+        else:
+            # Legacy mode
+            results = checker.simulate_version_change(args.srpm_name, args.new_version)
+
         checker.print_results(results)
 
         # Exit with error code if NEW conflicts found (not already-broken packages)
