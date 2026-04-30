@@ -9,6 +9,68 @@ import pytest
 from fedora_revdep_check import main, FedoraRevDepChecker
 
 
+class TestReleasever:
+    """Test --releasever CLI argument and auto-detection logic."""
+
+    def test_releasever_passed_to_checker(self, monkeypatch, mock_dnf_base):
+        """Test that --releasever CLI arg is passed through to FedoraRevDepChecker."""
+        monkeypatch.setattr('sys.argv', ['fedora-revdep-check', 'pytest', '8.0.0', '--releasever', '44'])
+
+        captured_releasever = []
+        original_init = FedoraRevDepChecker.__init__
+
+        def mock_init(self, verbose=False, base=None, repos=None, releasever=None):
+            captured_releasever.append(releasever)
+            original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos, releasever=releasever)
+
+        monkeypatch.setattr(FedoraRevDepChecker, '__init__', mock_init)
+        main()
+
+        assert captured_releasever == ['44']
+
+    def test_releasever_none_when_not_specified(self, monkeypatch, mock_dnf_base):
+        """Test that releasever is None when --releasever is not passed."""
+        monkeypatch.setattr('sys.argv', ['fedora-revdep-check', 'pytest', '8.0.0'])
+
+        captured_releasever = []
+        original_init = FedoraRevDepChecker.__init__
+
+        def mock_init(self, verbose=False, base=None, repos=None, releasever=None):
+            captured_releasever.append(releasever)
+            original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos, releasever=releasever)
+
+        monkeypatch.setattr(FedoraRevDepChecker, '__init__', mock_init)
+        main()
+
+        assert captured_releasever == [None]
+
+    def test_releasever_rawhide(self, monkeypatch, mock_dnf_base):
+        """Test that --releasever accepts 'rawhide'."""
+        monkeypatch.setattr('sys.argv', ['fedora-revdep-check', 'pytest', '8.0.0', '--releasever', 'rawhide'])
+
+        captured_releasever = []
+        original_init = FedoraRevDepChecker.__init__
+
+        def mock_init(self, verbose=False, base=None, repos=None, releasever=None):
+            captured_releasever.append(releasever)
+            original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos, releasever=releasever)
+
+        monkeypatch.setattr(FedoraRevDepChecker, '__init__', mock_init)
+        main()
+
+        assert captured_releasever == ['rawhide']
+
+    def test_releasever_stored_on_instance(self, mock_dnf_base):
+        """Test that releasever is stored on the checker instance."""
+        checker = FedoraRevDepChecker(verbose=False, base=mock_dnf_base, releasever='42')
+        assert checker.releasever == '42'
+
+    def test_releasever_default_is_none(self, mock_dnf_base):
+        """Test that releasever defaults to None."""
+        checker = FedoraRevDepChecker(verbose=False, base=mock_dnf_base)
+        assert checker.releasever is None
+
+
 class TestFullWorkflow:
     """Test complete CLI workflow through main() function."""
 
@@ -19,8 +81,8 @@ class TestFullWorkflow:
         # Mock FedoraRevDepChecker to use test base
         original_init = FedoraRevDepChecker.__init__
 
-        def mock_init(self, verbose=False, base=None, repos=None):
-            original_init(self, verbose=verbose, base=jupyterlab_base if base is None else base, repos=repos)
+        def mock_init(self, verbose=False, base=None, repos=None, releasever=None):
+            original_init(self, verbose=verbose, base=jupyterlab_base if base is None else base, repos=repos, releasever=releasever)
 
         monkeypatch.setattr(FedoraRevDepChecker, '__init__', mock_init)
 
@@ -40,8 +102,8 @@ class TestFullWorkflow:
 
         original_init = FedoraRevDepChecker.__init__
 
-        def mock_init(self, verbose=False, base=None, repos=None):
-            original_init(self, verbose=verbose, base=mock_pytest_base if base is None else base, repos=repos)
+        def mock_init(self, verbose=False, base=None, repos=None, releasever=None):
+            original_init(self, verbose=verbose, base=mock_pytest_base if base is None else base, repos=repos, releasever=releasever)
 
         monkeypatch.setattr(FedoraRevDepChecker, '__init__', mock_init)
 
@@ -58,8 +120,8 @@ class TestFullWorkflow:
 
         original_init = FedoraRevDepChecker.__init__
 
-        def mock_init(self, verbose=False, base=None, repos=None):
-            original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos)
+        def mock_init(self, verbose=False, base=None, repos=None, releasever=None):
+            original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos, releasever=releasever)
 
         monkeypatch.setattr(FedoraRevDepChecker, '__init__', mock_init)
 
@@ -77,7 +139,7 @@ class TestFullWorkflow:
         monkeypatch.setattr('sys.argv', ['fedora-revdep-check', 'test', '1.0.0'])
 
         # Mock FedoraRevDepChecker to raise an exception
-        def mock_init(self, verbose=False, base=None, repos=None):
+        def mock_init(self, verbose=False, base=None, repos=None, releasever=None):
             raise RuntimeError("Test error message")
 
         monkeypatch.setattr(FedoraRevDepChecker, '__init__', mock_init)
@@ -96,8 +158,8 @@ class TestFullWorkflow:
 
         original_init = FedoraRevDepChecker.__init__
 
-        def mock_init(self, verbose=False, base=None, repos=None):
-            original_init(self, verbose=verbose, base=jupyterlab_base if base is None else base, repos=repos)
+        def mock_init(self, verbose=False, base=None, repos=None, releasever=None):
+            original_init(self, verbose=verbose, base=jupyterlab_base if base is None else base, repos=repos, releasever=releasever)
 
         monkeypatch.setattr(FedoraRevDepChecker, '__init__', mock_init)
 
@@ -118,8 +180,8 @@ class TestFullWorkflow:
 
         original_init = FedoraRevDepChecker.__init__
 
-        def mock_init(self, verbose=False, base=None, repos=None):
-            original_init(self, verbose=verbose, base=jupyterlab_base if base is None else base, repos=repos)
+        def mock_init(self, verbose=False, base=None, repos=None, releasever=None):
+            original_init(self, verbose=verbose, base=jupyterlab_base if base is None else base, repos=repos, releasever=releasever)
 
         monkeypatch.setattr(FedoraRevDepChecker, '__init__', mock_init)
 
@@ -147,8 +209,8 @@ class TestFullWorkflow:
 
         original_init = FedoraRevDepChecker.__init__
 
-        def mock_init(self, verbose=False, base=None, repos=None):
-            original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos)
+        def mock_init(self, verbose=False, base=None, repos=None, releasever=None):
+            original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos, releasever=releasever)
 
         def mock_simulate(self, srpm_name, new_version):
             return {
@@ -185,8 +247,8 @@ class TestFullWorkflow:
 
         original_init = FedoraRevDepChecker.__init__
 
-        def mock_init(self, verbose=False, base=None, repos=None):
-            original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos)
+        def mock_init(self, verbose=False, base=None, repos=None, releasever=None):
+            original_init(self, verbose=verbose, base=mock_dnf_base if base is None else base, repos=repos, releasever=releasever)
 
         # Mock simulate_version_change to return mixed conflicts
         def mock_simulate(self, srpm_name, new_version):

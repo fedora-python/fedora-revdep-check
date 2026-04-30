@@ -37,16 +37,18 @@ OPERATOR_MAP = {
 class FedoraRevDepChecker:
     """Check reverse dependencies for Fedora package updates."""
 
-    def __init__(self, verbose=False, base=None, repos=None):
+    def __init__(self, verbose=False, base=None, repos=None, releasever=None):
         """Initialize the checker with DNF base and cached repo data.
 
         Args:
             verbose: Enable verbose output
             base: Optional DNF base object for testing (if None, creates real DNF base)
             repos: List of repository IDs to enable (default: ['rawhide', 'rawhide-source', 'koji', 'koji-source'])
+            releasever: Fedora release version (e.g. '44', 'rawhide'). Auto-detected from repos if not set.
         """
         self.verbose = verbose
         self.base = base
+        self.releasever = releasever
         self.repos = repos if repos is not None else ['rawhide', 'rawhide-source', 'koji', 'koji-source']
         if self.base is None:
             self._init_dnf()
@@ -114,19 +116,17 @@ class FedoraRevDepChecker:
             print("Initializing DNF 5 and loading repository metadata...")
         self.base = libdnf5.base.Base()
 
-        # Detect releasever from first repo name, or use 'rawhide' as default
-        # Extract version from repo names like 'fedora-40', 'f40', or use 'rawhide'
-        releasever = 'rawhide'
-        if self.repos:
-            first_repo = self.repos[0]
-            # Check if repo contains a version number
-            import re
-            version_match = re.search(r'(\d+)', first_repo)
-            if version_match:
-                releasever = version_match.group(1)
-            elif 'rawhide' not in first_repo.lower():
-                # If no version found and not rawhide, still use rawhide as fallback
-                releasever = 'rawhide'
+        # Use explicitly provided releasever, or detect from repo names
+        if self.releasever:
+            releasever = self.releasever
+        else:
+            releasever = 'rawhide'
+            if self.repos:
+                first_repo = self.repos[0]
+                import re
+                version_match = re.search(r'(\d+)', first_repo)
+                if version_match:
+                    releasever = version_match.group(1)
 
         # Configure releasever
         vars_map = self.base.get_vars()
@@ -679,6 +679,7 @@ Examples:
   %(prog)s python-requests 2.32.0 --verbose
   %(prog)s pytest 8.0.0 --repo fedora --repo fedora-source
   %(prog)s numpy 2.0.0 --repo fedora-40 --repo fedora-40-source
+  %(prog)s pytest 8.0.0 --releasever 44
         """
     )
 
@@ -690,11 +691,14 @@ Examples:
                         help='Repository ID to enable (can be specified multiple times). '
                              'Default: rawhide, rawhide-source, koji, and koji-source. '
                              'Known repositories will be auto-configured if not in /etc/yum.repos.d/')
+    parser.add_argument('--releasever',
+                        help='Fedora release version (e.g. 44, rawhide). '
+                             'Auto-detected from repo names if not specified.')
 
     args = parser.parse_args()
 
     try:
-        checker = FedoraRevDepChecker(verbose=args.verbose, repos=args.repos)
+        checker = FedoraRevDepChecker(verbose=args.verbose, repos=args.repos, releasever=args.releasever)
         results = checker.simulate_version_change(args.srpm_name, args.new_version)
         checker.print_results(results)
 
