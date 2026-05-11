@@ -331,22 +331,18 @@ class FedoraRevDepChecker:
                 with open(rpm_file, 'rb') as f:
                     hdr = ts.hdrFromFdno(f.fileno())
 
-                name = hdr[rpm.RPMTAG_NAME].decode() if isinstance(hdr[rpm.RPMTAG_NAME], bytes) else hdr[rpm.RPMTAG_NAME]
+                name = hdr[rpm.RPMTAG_NAME]
                 epoch = hdr[rpm.RPMTAG_EPOCH] if hdr[rpm.RPMTAG_EPOCH] is not None else 0
-                version = hdr[rpm.RPMTAG_VERSION].decode() if isinstance(hdr[rpm.RPMTAG_VERSION], bytes) else hdr[rpm.RPMTAG_VERSION]
-                release = hdr[rpm.RPMTAG_RELEASE].decode() if isinstance(hdr[rpm.RPMTAG_RELEASE], bytes) else hdr[rpm.RPMTAG_RELEASE]
-                arch = hdr[rpm.RPMTAG_ARCH].decode() if isinstance(hdr[rpm.RPMTAG_ARCH], bytes) else hdr[rpm.RPMTAG_ARCH]
+                version = hdr[rpm.RPMTAG_VERSION]
+                release = hdr[rpm.RPMTAG_RELEASE]
+                arch = hdr[rpm.RPMTAG_ARCH]
                 sourcerpm = hdr[rpm.RPMTAG_SOURCERPM]
-                if sourcerpm:
-                    sourcerpm = sourcerpm.decode() if isinstance(sourcerpm, bytes) else sourcerpm
 
                 # Extract SRPM name from SOURCERPM tag
                 if sourcerpm:
-                    # Format is typically: name-version-release.src.rpm
                     srpm_name = sourcerpm.rsplit('-', 2)[0]
                     srpm_names.add(srpm_name)
                 else:
-                    # This is a source RPM
                     srpm_names.add(name)
 
                 # Skip source RPMs for provides (RPMTAG_SOURCEPACKAGE is set for SRPMs
@@ -356,17 +352,18 @@ class FedoraRevDepChecker:
                         print(f"Skipping source RPM: {name}-{version}-{release}")
                     continue
 
+                evr = f"{epoch}:{version}-{release}" if epoch else f"{version}-{release}"
                 rpm_info[rpm_file] = {
                     'name': name,
                     'epoch': epoch,
                     'version': version,
                     'release': release,
                     'arch': arch,
-                    'evr': f"{epoch}:{version}-{release}" if epoch else f"{version}-{release}"
+                    'evr': evr,
                 }
 
                 if self.verbose:
-                    print(f"Reading {name}-{epoch}:{version}-{release}.{arch}")
+                    print(f"Reading {name}-{evr}.{arch}")
 
                 # Extract provides
                 provides_names = hdr[rpm.RPMTAG_PROVIDENAME]
@@ -375,7 +372,6 @@ class FedoraRevDepChecker:
 
                 if provides_names:
                     for i, prov_name in enumerate(provides_names):
-                        prov_name = prov_name.decode() if isinstance(prov_name, bytes) else prov_name
 
                         # Skip bundled provides
                         if prov_name.startswith('bundled('):
@@ -384,9 +380,8 @@ class FedoraRevDepChecker:
                         prov_version = None
                         full_provide = prov_name
 
-                        # Check if there's a version
                         if provides_versions and i < len(provides_versions) and provides_versions[i]:
-                            prov_version = provides_versions[i].decode() if isinstance(provides_versions[i], bytes) else provides_versions[i]
+                            prov_version = provides_versions[i]
 
                             if provides_flags and i < len(provides_flags):
                                 flags = provides_flags[i]

@@ -16,12 +16,12 @@ class MockRPMHeader:
                  sourcepackage=0, provides_names=None, provides_versions=None,
                  provides_flags=None):
         self.data = {
-            1000: name.encode() if isinstance(name, str) else name,
-            1001: version.encode() if isinstance(version, str) else version,
-            1002: release.encode() if isinstance(release, str) else release,
-            1022: arch.encode() if isinstance(arch, str) else arch,
+            1000: name,
+            1001: version,
+            1002: release,
+            1022: arch,
             1003: epoch,
-            1044: sourcerpm.encode() if sourcerpm and isinstance(sourcerpm, str) else sourcerpm,
+            1044: sourcerpm,
             1106: sourcepackage,
             1047: provides_names,
             1113: provides_flags,
@@ -64,20 +64,19 @@ class TestCheckRPMFiles:
         base = MockBase(packages=packages)
         checker = FedoraRevDepChecker(verbose=False, base=base)
 
-        # Mock RPM for pytest 7.1.0
         mock_header = MockRPMHeader(
             name='python3-pytest',
-            version='7.1.0',
+            version='7.1',
             release='1.fc45',
             arch='noarch',
-            sourcerpm='pytest-7.1.0-1.fc45.src.rpm',
+            sourcerpm='pytest-7.1-1.fc45.src.rpm',
             provides_names=[
-                b'python3-pytest',
-                b'python3dist(pytest)',
+                'python3-pytest',
+                'python3dist(pytest)',
             ],
             provides_versions=[
-                b'7.1.0-1.fc45',
-                b'7.1.0',
+                '7.1-1.fc45',
+                '7.1',
             ],
             provides_flags=[8, 8]
         )
@@ -107,7 +106,7 @@ class TestCheckRPMFiles:
             result = checker.check_rpm_files(['/tmp/pytest.rpm'])
 
             assert result['srpm_name'] == 'pytest'
-            assert result['new_version'] == '7.1.0-1.fc45'
+            assert result['new_version'] == '7.1-1.fc45'
             assert len(result['conflicts']) == 0
 
     def test_check_rpm_files_with_conflicts(self):
@@ -147,12 +146,12 @@ class TestCheckRPMFiles:
             arch='noarch',
             sourcerpm='jupyterlab-4.7.0-1.fc45.src.rpm',
             provides_names=[
-                b'python3-jupyterlab',
-                b'python3dist(jupyterlab)',
+                'python3-jupyterlab',
+                'python3dist(jupyterlab)',
             ],
             provides_versions=[
-                b'4.7.0-1.fc45',
-                b'4.7.0',
+                '4.7.0-1.fc45',
+                '4.7.0',
             ],
             provides_flags=[8, 8]
         )
@@ -228,12 +227,12 @@ class TestCheckRPMFiles:
             epoch=1,
             sourcerpm='python-sphinx-9.1.0-1.fc45.src.rpm',
             provides_names=[
-                b'python3-sphinx',
-                b'python3dist(sphinx)',
+                'python3-sphinx',
+                'python3dist(sphinx)',
             ],
             provides_versions=[
-                b'9.1.0-1.fc45',
-                b'9.1.0',
+                '9.1.0-1.fc45',
+                '9.1.0',
             ],
             provides_flags=[8, 8]
         )
@@ -303,10 +302,10 @@ class TestCheckRPMFiles:
             arch='noarch',
             sourcerpm='micropipenv-1.11.0-1.fc45.src.rpm',
             provides_names=[
-                b'micropipenv',
+                'micropipenv',
             ],
             provides_versions=[
-                b'1.11.0-1.fc45',
+                '1.11.0-1.fc45',
             ],
             provides_flags=[8]
         )
@@ -375,12 +374,12 @@ class TestCheckRPMFiles:
             arch='noarch',
             sourcerpm='library-5.0.0-1.fc45.src.rpm',
             provides_names=[
-                b'library',
-                b'python3dist(library)',
+                'library',
+                'python3dist(library)',
             ],
             provides_versions=[
-                b'5.0.0-1.fc45',
-                b'5.0.0',
+                '5.0.0-1.fc45',
+                '5.0.0',
             ],
             provides_flags=[8, 8]
         )
