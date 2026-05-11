@@ -1,354 +1,187 @@
 """
 Integration tests for check_rpm_files() functionality.
 
-Tests the complete workflow of checking RPM files for reverse dependency conflicts.
+Uses real RPM files from tests/fixtures/rpms/ for the RPM-reading layer.
+The DNF layer (repository queries, reverse dependency lookup) is still mocked
+via MockBase/MockPackage — that part has its own tests elsewhere.
+
+Spec files for rebuilding the fixtures live in tests/fixtures/rpms/specs/.
 """
 
-from contextlib import contextmanager
-from unittest.mock import Mock, mock_open, patch
+from pathlib import Path
+
 from fedora_revdep_check import FedoraRevDepChecker
 from tests.fixtures.mock_packages import MockPackage, MockBase
 
-
-class MockRPMHeader:
-    """Mock RPM header for testing."""
-
-    def __init__(self, name, version, release, arch, epoch=None, sourcerpm=None,
-                 sourcepackage=0, provides_names=None, provides_versions=None,
-                 provides_flags=None):
-        self.data = {
-            1000: name,
-            1001: version,
-            1002: release,
-            1022: arch,
-            1003: epoch,
-            1044: sourcerpm,
-            1106: sourcepackage,
-            1047: provides_names,
-            1113: provides_flags,
-            1048: provides_versions,
-        }
-
-    def __getitem__(self, key):
-        return self.data.get(key)
-
-
-@contextmanager
-def rpm_patches(mock_ts):
-    """Context manager providing all rpm module patches needed for tests."""
-    with (patch('rpm.TransactionSet', return_value=mock_ts),
-          patch('rpm._RPMVSF_NOSIGNATURES', 0),
-          patch('rpm._RPMVSF_NODIGESTS', 0),
-          patch('rpm.RPMTAG_NAME', 1000),
-          patch('rpm.RPMTAG_VERSION', 1001),
-          patch('rpm.RPMTAG_RELEASE', 1002),
-          patch('rpm.RPMTAG_ARCH', 1022),
-          patch('rpm.RPMTAG_EPOCH', 1003),
-          patch('rpm.RPMTAG_SOURCERPM', 1044),
-          patch('rpm.RPMTAG_SOURCEPACKAGE', 1106),
-          patch('rpm.RPMTAG_PROVIDENAME', 1047),
-          patch('rpm.RPMTAG_PROVIDEFLAGS', 1113),
-          patch('rpm.RPMTAG_PROVIDEVERSION', 1048),
-          patch('rpm.RPMSENSE_EQUAL', 8),
-          patch('rpm.RPMSENSE_GREATER', 4),
-          patch('rpm.RPMSENSE_LESS', 2),
-          patch('os.path.exists', return_value=True),
-          patch('builtins.open', mock_open())):
-        yield
+RPM_DIR = Path(__file__).parent.parent / 'fixtures' / 'rpms'
 
 
 class TestCheckRPMFiles:
-    """Test check_rpm_files() integration."""
+    """Test check_rpm_files() end-to-end with real RPM files."""
 
     def test_check_rpm_files_no_conflicts(self):
-        """Test checking RPM files that don't cause conflicts."""
-        # Create a mock base with packages that depend on pytest >= 7.0
+        """Updating revdeptest-foo to 1.0 satisfies all existing requirements."""
         packages = [
             MockPackage(
-                name='python3-pytest',
-                version='7.0.0',
-                release='1.fc45',
+                name='revdeptest-foo',
+                version='0.9',
+                release='1',
                 arch='noarch',
-                source_name='pytest',
+                source_name='revdeptest-foo',
                 provides=[
-                    'python3-pytest',
-                    'python3dist(pytest) = 7.0.0',
+                    'revdeptest-foo',
+                    'python3dist(revdeptest-foo) = 0.9',
                 ]
             ),
             MockPackage(
-                name='python3-tox',
-                version='4.0.0',
-                release='1.fc45',
+                name='consumer',
+                version='1.0',
+                release='1',
                 arch='noarch',
-                source_name='tox',
+                source_name='consumer',
                 requires=[
-                    'python3dist(pytest) >= 6.0',
+                    'python3dist(revdeptest-foo) >= 0.5',
                 ]
             ),
         ]
-        base = MockBase(packages=packages)
-        checker = FedoraRevDepChecker(verbose=False, base=base)
+        checker = FedoraRevDepChecker(verbose=False, base=MockBase(packages=packages))
 
-        mock_header = MockRPMHeader(
-            name='python3-pytest',
-            version='7.1',
-            release='1.fc45',
-            arch='noarch',
-            sourcerpm='pytest-7.1-1.fc45.src.rpm',
-            provides_names=[
-                'python3-pytest',
-                'python3dist(pytest)',
-            ],
-            provides_versions=[
-                '7.1-1.fc45',
-                '7.1',
-            ],
-            provides_flags=[8, 8]
-        )
+        result = checker.check_rpm_files([str(RPM_DIR / 'revdeptest-foo-1.0-1.noarch.rpm')])
 
-        mock_ts = Mock()
-        mock_ts.hdrFromFdno = Mock(return_value=mock_header)
-
-        with rpm_patches(mock_ts):
-
-            result = checker.check_rpm_files(['/tmp/pytest.rpm'])
-
-            assert result['srpm_name'] == 'pytest'
-            assert result['new_version'] == '7.1-1.fc45'
-            assert len(result['conflicts']) == 0
+        assert result['srpm_name'] == 'revdeptest-foo'
+        assert len(result['conflicts']) == 0
 
     def test_check_rpm_files_with_conflicts(self):
-        """Test checking RPM files that cause conflicts."""
-        # Create a mock base with packages that depend on jupyterlab < 4.7
+        """Updating revdeptest-foo to 1.0 breaks a package requiring < 1.0."""
         packages = [
             MockPackage(
-                name='python3-jupyterlab',
-                version='4.6.0',
-                release='1.fc45',
+                name='revdeptest-foo',
+                version='0.9',
+                release='1',
                 arch='noarch',
-                source_name='jupyterlab',
+                source_name='revdeptest-foo',
                 provides=[
-                    'python3-jupyterlab',
-                    'python3dist(jupyterlab) = 4.6.0',
+                    'revdeptest-foo',
+                    'python3dist(revdeptest-foo) = 0.9',
                 ]
             ),
             MockPackage(
-                name='python3-jupyter-server',
-                version='2.0.0',
-                release='1.fc45',
+                name='old-consumer',
+                version='1.0',
+                release='1',
                 arch='noarch',
-                source_name='jupyter-server',
+                source_name='old-consumer',
                 requires=[
-                    'python3dist(jupyterlab) < 4.7',
+                    'python3dist(revdeptest-foo) < 1.0',
                 ]
             ),
         ]
-        base = MockBase(packages=packages)
-        checker = FedoraRevDepChecker(verbose=False, base=base)
+        checker = FedoraRevDepChecker(verbose=False, base=MockBase(packages=packages))
 
-        # Mock RPM for jupyterlab 4.7.0
-        mock_header = MockRPMHeader(
-            name='python3-jupyterlab',
-            version='4.7.0',
-            release='1.fc45',
-            arch='noarch',
-            sourcerpm='jupyterlab-4.7.0-1.fc45.src.rpm',
-            provides_names=[
-                'python3-jupyterlab',
-                'python3dist(jupyterlab)',
-            ],
-            provides_versions=[
-                '4.7.0-1.fc45',
-                '4.7.0',
-            ],
-            provides_flags=[8, 8]
-        )
+        result = checker.check_rpm_files([str(RPM_DIR / 'revdeptest-foo-1.0-1.noarch.rpm')])
 
-        mock_ts = Mock()
-        mock_ts.hdrFromFdno = Mock(return_value=mock_header)
-
-        with rpm_patches(mock_ts):
-
-            result = checker.check_rpm_files(['/tmp/jupyterlab.rpm'])
-
-            assert result['srpm_name'] == 'jupyterlab'
-            assert len(result['conflicts']) == 1
-            conflict = result['conflicts'][0]
-            assert conflict['rdep_source'] == 'jupyter-server'
-            assert conflict['provide_name'] == 'python3dist(jupyterlab)'
-            assert 'python3dist(jupyterlab) < 4.7' in conflict['failed_constraint']
+        assert result['srpm_name'] == 'revdeptest-foo'
+        assert len(result['conflicts']) == 1
+        conflict = result['conflicts'][0]
+        assert conflict['rdep_source'] == 'old-consumer'
+        assert conflict['provide_name'] == 'python3dist(revdeptest-foo)'
+        assert 'python3dist(revdeptest-foo) < 1.0' in conflict['failed_constraint']
 
     def test_check_rpm_files_with_epoch(self):
-        """Test checking RPM files with epochs."""
-        # Create a mock base with packages requiring sphinx >= 1:8.0.0
+        """Updating revdeptest-epoch (Epoch:1) to 9.1.0 satisfies >= 1:8.0.0."""
         packages = [
             MockPackage(
-                name='python3-sphinx',
+                name='revdeptest-epoch',
                 version='8.0.0',
-                release='1.fc45',
+                release='1',
                 arch='noarch',
-                source_name='python-sphinx',  # Must match SOURCERPM
+                source_name='revdeptest-epoch',
                 epoch='1',
                 provides=[
-                    'python3-sphinx',
-                    'python3-sphinx = 1:8.0.0-1.fc45',
-                    'python3dist(sphinx) = 8.0.0',
+                    'revdeptest-epoch',
+                    'revdeptest-epoch = 1:8.0.0-1',
+                    'python3dist(revdeptest-epoch) = 8.0.0',
                 ]
             ),
             MockPackage(
-                name='python3-docs',
-                version='1.0.0',
-                release='1.fc45',
+                name='consumer',
+                version='1.0',
+                release='1',
                 arch='noarch',
-                source_name='python-docs',
+                source_name='consumer',
                 requires=[
-                    'python3-sphinx >= 1:8.0.0',
+                    'revdeptest-epoch >= 1:8.0.0',
                 ]
             ),
         ]
-        base = MockBase(packages=packages)
-        checker = FedoraRevDepChecker(verbose=False, base=base)
+        checker = FedoraRevDepChecker(verbose=False, base=MockBase(packages=packages))
 
-        # Mock RPM for sphinx 1:9.1.0
-        mock_header = MockRPMHeader(
-            name='python3-sphinx',
-            version='9.1.0',
-            release='1.fc45',
-            arch='noarch',
-            epoch=1,
-            sourcerpm='python-sphinx-9.1.0-1.fc45.src.rpm',
-            provides_names=[
-                'python3-sphinx',
-                'python3dist(sphinx)',
-            ],
-            provides_versions=[
-                '9.1.0-1.fc45',
-                '9.1.0',
-            ],
-            provides_flags=[8, 8]
-        )
+        result = checker.check_rpm_files([str(RPM_DIR / 'revdeptest-epoch-9.1.0-1.noarch.rpm')])
 
-        mock_ts = Mock()
-        mock_ts.hdrFromFdno = Mock(return_value=mock_header)
-
-        with rpm_patches(mock_ts):
-
-            result = checker.check_rpm_files(['/tmp/sphinx.rpm'])
-
-            assert result['srpm_name'] == 'python-sphinx'
-            # Should have no conflicts (1:9.1.0 >= 1:8.0.0)
-            assert len(result['conflicts']) == 0
+        assert result['srpm_name'] == 'revdeptest-epoch'
+        assert len(result['conflicts']) == 0
 
     def test_check_rpm_files_skips_same_srpm(self):
-        """Test that packages from same SRPM are skipped."""
-        # Create a mock base where packages from the same SRPM depend on each other
+        """Packages from the same SRPM are not flagged as conflicts."""
         packages = [
             MockPackage(
-                name='micropipenv',
-                version='1.10.0',
-                release='1.fc45',
+                name='revdeptest-multi',
+                version='0.9',
+                release='1',
                 arch='noarch',
-                source_name='micropipenv',
+                source_name='revdeptest-multi',
                 provides=[
-                    'micropipenv',
-                    'micropipenv = 1.10.0-1.fc45',
+                    'revdeptest-multi',
+                    'python3dist(revdeptest-multi) = 0.9',
                 ]
             ),
             MockPackage(
-                name='micropipenv+toml',
-                version='1.10.0',
-                release='1.fc45',
+                name='revdeptest-multi-sub',
+                version='0.9',
+                release='1',
                 arch='noarch',
-                source_name='micropipenv',
+                source_name='revdeptest-multi',
                 requires=[
-                    'micropipenv = 1.10.0',
+                    'revdeptest-multi = 0.9',
                 ]
             ),
         ]
-        base = MockBase(packages=packages)
-        checker = FedoraRevDepChecker(verbose=False, base=base)
+        checker = FedoraRevDepChecker(verbose=False, base=MockBase(packages=packages))
 
-        # Mock RPM for micropipenv 1.11.0
-        mock_header = MockRPMHeader(
-            name='micropipenv',
-            version='1.11.0',
-            release='1.fc45',
-            arch='noarch',
-            sourcerpm='micropipenv-1.11.0-1.fc45.src.rpm',
-            provides_names=[
-                'micropipenv',
-            ],
-            provides_versions=[
-                '1.11.0-1.fc45',
-            ],
-            provides_flags=[8]
-        )
+        result = checker.check_rpm_files([str(RPM_DIR / 'revdeptest-multi-1.0-1.noarch.rpm')])
 
-        mock_ts = Mock()
-        mock_ts.hdrFromFdno = Mock(return_value=mock_header)
-
-        with rpm_patches(mock_ts):
-
-            result = checker.check_rpm_files(['/tmp/micropipenv.rpm'])
-
-            # micropipenv+toml should be skipped (same SRPM)
-            assert len(result['conflicts']) == 0
+        assert len(result['conflicts']) == 0
 
     def test_check_rpm_files_already_broken(self):
-        """Test detection of already-broken packages."""
-        # Create a mock base where a package already fails with current version
+        """A conflict that exists before the update is marked already_broken."""
         packages = [
             MockPackage(
-                name='library',
-                version='4.0.0',
-                release='1.fc45',
+                name='revdeptest-foo',
+                version='0.9',
+                release='1',
                 arch='noarch',
-                source_name='library',
+                source_name='revdeptest-foo',
                 provides=[
-                    'library',
-                    'python3dist(library) = 4.0.0',
+                    'revdeptest-foo',
+                    'python3dist(revdeptest-foo) = 0.9',
                 ]
             ),
             MockPackage(
-                name='python3-old-package',
-                version='1.0.0',
-                release='1.fc45',
+                name='old-consumer',
+                version='1.0',
+                release='1',
                 arch='noarch',
-                source_name='old-package',
+                source_name='old-consumer',
                 requires=[
-                    'python3dist(library) < 3.0',  # Already broken with 4.0.0
+                    'python3dist(revdeptest-foo) < 0.5',  # already broken with 0.9
                 ]
             ),
         ]
-        base = MockBase(packages=packages)
-        checker = FedoraRevDepChecker(verbose=False, base=base)
+        checker = FedoraRevDepChecker(verbose=False, base=MockBase(packages=packages))
 
-        # Mock RPM for library 5.0.0
-        mock_header = MockRPMHeader(
-            name='library',
-            version='5.0.0',
-            release='1.fc45',
-            arch='noarch',
-            sourcerpm='library-5.0.0-1.fc45.src.rpm',
-            provides_names=[
-                'library',
-                'python3dist(library)',
-            ],
-            provides_versions=[
-                '5.0.0-1.fc45',
-                '5.0.0',
-            ],
-            provides_flags=[8, 8]
-        )
+        result = checker.check_rpm_files([str(RPM_DIR / 'revdeptest-foo-1.0-1.noarch.rpm')])
 
-        mock_ts = Mock()
-        mock_ts.hdrFromFdno = Mock(return_value=mock_header)
-
-        with rpm_patches(mock_ts):
-
-            result = checker.check_rpm_files(['/tmp/library.rpm'])
-
-            assert len(result['conflicts']) == 1
-            conflict = result['conflicts'][0]
-            assert conflict['already_broken'] is True
-            assert 'python3dist(library) < 3.0' in conflict['failed_constraint']
+        assert len(result['conflicts']) == 1
+        conflict = result['conflicts'][0]
+        assert conflict['already_broken'] is True
+        assert 'python3dist(revdeptest-foo) < 0.5' in conflict['failed_constraint']
