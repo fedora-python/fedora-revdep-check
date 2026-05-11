@@ -1,267 +1,101 @@
 """
 Unit tests for RPM file reading functionality.
 
-Tests the read_rpm_provides() method using mocked RPM headers (no real RPM files).
+Uses real RPM files from tests/fixtures/rpms/ — no rpm module mocking.
+Spec files for rebuilding the fixtures live in tests/fixtures/rpms/specs/.
 """
 
 import pytest
-from contextlib import contextmanager
-from unittest.mock import Mock, mock_open, patch
+from pathlib import Path
 from fedora_revdep_check import FedoraRevDepChecker
 
-
-class MockRPMHeader:
-    """Mock RPM header for testing."""
-
-    def __init__(self, name, version, release, arch, epoch=None, sourcerpm=None,
-                 sourcepackage=0, provides_names=None, provides_versions=None,
-                 provides_flags=None):
-        self.data = {
-            1000: name,
-            1001: version,
-            1002: release,
-            1022: arch,
-            1003: epoch,
-            1044: sourcerpm,
-            1106: sourcepackage,
-            1047: provides_names,
-            1113: provides_flags,
-            1048: provides_versions,
-        }
-
-    def __getitem__(self, key):
-        return self.data.get(key)
-
-
-@contextmanager
-def rpm_patches(mock_ts):
-    """Context manager providing all rpm module patches needed for tests."""
-    with (patch('rpm.TransactionSet', return_value=mock_ts),
-          patch('rpm._RPMVSF_NOSIGNATURES', 0),
-          patch('rpm._RPMVSF_NODIGESTS', 0),
-          patch('rpm.RPMTAG_NAME', 1000),
-          patch('rpm.RPMTAG_VERSION', 1001),
-          patch('rpm.RPMTAG_RELEASE', 1002),
-          patch('rpm.RPMTAG_ARCH', 1022),
-          patch('rpm.RPMTAG_EPOCH', 1003),
-          patch('rpm.RPMTAG_SOURCERPM', 1044),
-          patch('rpm.RPMTAG_SOURCEPACKAGE', 1106),
-          patch('rpm.RPMTAG_PROVIDENAME', 1047),
-          patch('rpm.RPMTAG_PROVIDEFLAGS', 1113),
-          patch('rpm.RPMTAG_PROVIDEVERSION', 1048),
-          patch('rpm.RPMSENSE_EQUAL', 8),
-          patch('rpm.RPMSENSE_GREATER', 4),
-          patch('rpm.RPMSENSE_LESS', 2),
-          patch('os.path.exists', return_value=True),
-          patch('builtins.open', mock_open())):
-        yield
+RPM_DIR = Path(__file__).parent.parent / 'fixtures' / 'rpms'
 
 
 class TestReadRPMProvides:
-    """Test read_rpm_provides() method."""
+    """Test read_rpm_provides() against real RPM files."""
 
     @pytest.fixture
     def checker(self, mock_dnf_base):
-        """Create checker instance with mocked DNF base."""
         return FedoraRevDepChecker(verbose=False, base=mock_dnf_base)
 
     def test_read_single_rpm_file(self, checker):
-        """Test reading a single RPM file."""
-        mock_header = MockRPMHeader(
-            name='python3-sphinx',
-            version='9.1.0',
-            release='1.fc45',
-            arch='noarch',
-            epoch=1,
-            sourcerpm='python-sphinx-9.1.0-1.fc45.src.rpm',
-            provides_names=[
-                'python3-sphinx',
-                'python3dist(sphinx)',
-            ],
-            provides_versions=[
-                '9.1.0-1.fc45',
-                '9.1.0',
-            ],
-            provides_flags=[
-                8,  # RPMSENSE_EQUAL
-                8,  # RPMSENSE_EQUAL
-            ]
-        )
+        """Read a single RPM with Epoch: 1 and verify header fields."""
+        rpm_file = str(RPM_DIR / 'revdeptest-epoch-9.1.0-1.noarch.rpm')
 
-        mock_ts = Mock()
-        mock_ts.hdrFromFdno = Mock(return_value=mock_header)
+        result = checker.read_rpm_provides([rpm_file])
 
-        with rpm_patches(mock_ts):
+        assert result['srpm_name'] == 'revdeptest-epoch'
+        assert 'revdeptest-epoch' in result['provides']
+        assert 'python3dist(revdeptest-epoch)' in result['provides']
+        assert len(result['rpm_info']) == 1
 
-            result = checker.read_rpm_provides(['/tmp/test.rpm'])
-
-            assert result['srpm_name'] == 'python-sphinx'
-            assert 'python3-sphinx' in result['provides']
-            assert 'python3dist(sphinx)' in result['provides']
-            assert len(result['rpm_info']) == 1
-
-            rpm_info = result['rpm_info']['/tmp/test.rpm']
-            assert rpm_info['name'] == 'python3-sphinx'
-            assert rpm_info['version'] == '9.1.0'
-            assert rpm_info['release'] == '1.fc45'
-            assert rpm_info['arch'] == 'noarch'
-            assert rpm_info['epoch'] == 1
+        info = result['rpm_info'][rpm_file]
+        assert info['name'] == 'revdeptest-epoch'
+        assert info['epoch'] == 1
+        assert info['version'] == '9.1.0'
+        assert info['release'] == '1'
+        assert info['arch'] == 'noarch'
+        assert info['evr'] == '1:9.1.0-1'
 
     def test_read_multiple_rpm_files(self, checker):
-        """Test reading multiple RPM files from same SRPM."""
-        mock_header1 = MockRPMHeader(
-            name='python3-sphinx',
-            version='9.1.0',
-            release='1.fc45',
-            arch='noarch',
-            epoch=1,
-            sourcerpm='python-sphinx-9.1.0-1.fc45.src.rpm',
-            provides_names=['python3-sphinx', 'python3dist(sphinx)'],
-            provides_versions=['9.1.0-1.fc45', '9.1.0'],
-            provides_flags=[8, 8]
-        )
+        """Read two binary RPMs from the same SRPM."""
+        rpm_main = str(RPM_DIR / 'revdeptest-multi-1.0-1.noarch.rpm')
+        rpm_sub = str(RPM_DIR / 'revdeptest-multi-sub-1.0-1.noarch.rpm')
 
-        mock_header2 = MockRPMHeader(
-            name='python3-sphinx-latex',
-            version='9.1.0',
-            release='1.fc45',
-            arch='noarch',
-            epoch=1,
-            sourcerpm='python-sphinx-9.1.0-1.fc45.src.rpm',
-            provides_names=['python3-sphinx-latex'],
-            provides_versions=['9.1.0-1.fc45'],
-            provides_flags=[8]
-        )
+        result = checker.read_rpm_provides([rpm_main, rpm_sub])
 
-        mock_ts = Mock()
-        mock_ts.hdrFromFdno = Mock(side_effect=[mock_header1, mock_header2])
-
-        with rpm_patches(mock_ts):
-
-            result = checker.read_rpm_provides(['/tmp/test1.rpm', '/tmp/test2.rpm'])
-
-            assert result['srpm_name'] == 'python-sphinx'
-            assert 'python3-sphinx' in result['provides']
-            assert 'python3dist(sphinx)' in result['provides']
-            assert 'python3-sphinx-latex' in result['provides']
-            assert len(result['rpm_info']) == 2
+        assert result['srpm_name'] == 'revdeptest-multi'
+        assert 'revdeptest-multi' in result['provides']
+        assert 'python3dist(revdeptest-multi)' in result['provides']
+        assert 'revdeptest-multi-sub' in result['provides']
+        assert 'python3dist(revdeptest-multi-sub)' in result['provides']
+        assert len(result['rpm_info']) == 2
 
     def test_skip_source_rpm(self, checker):
-        """Test that source RPMs are skipped for provides.
+        """Source RPMs must be skipped even though their arch tag is 'noarch'.
 
-        Real SRPMs report arch='noarch' (not 'src'), so RPMTAG_SOURCEPACKAGE
-        is the correct way to identify them.
+        Real SRPMs on Fedora have Arch=noarch in their header, not Arch=src.
+        The correct signal is RPMTAG_SOURCEPACKAGE=1, which is what the
+        implementation checks.
         """
-        mock_header = MockRPMHeader(
-            name='python-sphinx',
-            version='9.1.0',
-            release='1.fc45',
-            arch='noarch',  # real SRPMs report noarch, not 'src'
-            sourcerpm=None,
-            sourcepackage=1,  # this is what identifies a source RPM
-            provides_names=['python-sphinx'],
-            provides_versions=['9.1.0-1.fc45'],
-            provides_flags=[8]
-        )
+        srpm = str(RPM_DIR / 'revdeptest-foo-1.0-1.src.rpm')
 
-        mock_ts = Mock()
-        mock_ts.hdrFromFdno = Mock(return_value=mock_header)
+        result = checker.read_rpm_provides([srpm])
 
-        with rpm_patches(mock_ts):
-
-            result = checker.read_rpm_provides(['/tmp/test.src.rpm'])
-
-            assert result['srpm_name'] == 'python-sphinx'
-            # Source RPM provides should be skipped
-            assert len(result['provides']) == 0
-            assert len(result['rpm_info']) == 0
+        assert result['srpm_name'] == 'revdeptest-foo'
+        assert len(result['provides']) == 0
+        assert len(result['rpm_info']) == 0
 
     def test_skip_bundled_provides(self, checker):
-        """Test that bundled provides are filtered out."""
-        mock_header = MockRPMHeader(
-            name='myapp',
-            version='1.0.0',
-            release='1.fc45',
-            arch='noarch',
-            sourcerpm='myapp-1.0.0-1.fc45.src.rpm',
-            provides_names=[
-                'myapp',
-                'bundled(libfoo)',
-                'bundled(libbar)',
-            ],
-            provides_versions=['1.0.0', '2.0', '3.0'],
-            provides_flags=[8, 8, 8]
-        )
+        """Provides that start with 'bundled(' must be filtered out."""
+        rpm_file = str(RPM_DIR / 'revdeptest-bundled-1.0-1.noarch.rpm')
 
-        mock_ts = Mock()
-        mock_ts.hdrFromFdno = Mock(return_value=mock_header)
+        result = checker.read_rpm_provides([rpm_file])
 
-        with rpm_patches(mock_ts):
-
-            result = checker.read_rpm_provides(['/tmp/myapp.rpm'])
-
-            assert 'myapp' in result['provides']
-            assert 'bundled(libfoo)' not in result['provides']
-            assert 'bundled(libbar)' not in result['provides']
+        assert 'revdeptest-bundled' in result['provides']
+        assert 'bundled(libfoo)' not in result['provides']
+        assert 'bundled(libbar)' not in result['provides']
 
     def test_mixed_source_packages_error(self, checker):
-        """Test that mixing RPMs from different SRPMs raises error."""
-        mock_header1 = MockRPMHeader(
-            name='python3-sphinx',
-            version='9.1.0',
-            release='1.fc45',
-            arch='noarch',
-            sourcerpm='python-sphinx-9.1.0-1.fc45.src.rpm',
-            provides_names=['python3-sphinx'],
-            provides_versions=['9.1.0'],
-            provides_flags=[8]
-        )
+        """Passing RPMs from two different SRPMs must raise ValueError."""
+        rpm_foo = str(RPM_DIR / 'revdeptest-foo-1.0-1.noarch.rpm')
+        rpm_bar = str(RPM_DIR / 'revdeptest-bar-1.0-1.noarch.rpm')
 
-        mock_header2 = MockRPMHeader(
-            name='python3-requests',
-            version='2.32.0',
-            release='1.fc45',
-            arch='noarch',
-            sourcerpm='python-requests-2.32.0-1.fc45.src.rpm',
-            provides_names=['python3-requests'],
-            provides_versions=['2.32.0'],
-            provides_flags=[8]
-        )
-
-        mock_ts = Mock()
-        mock_ts.hdrFromFdno = Mock(side_effect=[mock_header1, mock_header2])
-
-        with rpm_patches(mock_ts):
-
-            with pytest.raises(ValueError, match="multiple source packages"):
-                checker.read_rpm_provides(['/tmp/test1.rpm', '/tmp/test2.rpm'])
+        with pytest.raises(ValueError, match="multiple source packages"):
+            checker.read_rpm_provides([rpm_foo, rpm_bar])
 
     def test_file_not_found_error(self, checker):
-        """Test error handling for missing RPM file."""
+        """A path that does not exist must raise FileNotFoundError."""
         with pytest.raises(FileNotFoundError, match="RPM file not found"):
             checker.read_rpm_provides(['/nonexistent/file.rpm'])
 
     def test_rpm_without_epoch(self, checker):
-        """Test RPM file without epoch (epoch=None)."""
-        mock_header = MockRPMHeader(
-            name='mypackage',
-            version='1.0.0',
-            release='1.fc45',
-            arch='noarch',
-            epoch=None,
-            sourcerpm='mypackage-1.0.0-1.fc45.src.rpm',
-            provides_names=['mypackage'],
-            provides_versions=['1.0.0'],
-            provides_flags=[8]
-        )
+        """Epoch defaults to 0 and evr is formatted without an epoch prefix."""
+        rpm_file = str(RPM_DIR / 'revdeptest-foo-1.0-1.noarch.rpm')
 
-        mock_ts = Mock()
-        mock_ts.hdrFromFdno = Mock(return_value=mock_header)
+        result = checker.read_rpm_provides([rpm_file])
 
-        with rpm_patches(mock_ts):
-
-            result = checker.read_rpm_provides(['/tmp/test.rpm'])
-
-            rpm_info = result['rpm_info']['/tmp/test.rpm']
-            assert rpm_info['epoch'] == 0
-            assert rpm_info['evr'] == '1.0.0-1.fc45'
+        info = result['rpm_info'][rpm_file]
+        assert info['epoch'] == 0
+        assert info['evr'] == '1.0-1'
