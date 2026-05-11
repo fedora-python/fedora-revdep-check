@@ -388,17 +388,21 @@ class FedoraRevDepChecker:
                         if provides_versions and i < len(provides_versions) and provides_versions[i]:
                             prov_version = provides_versions[i].decode() if isinstance(provides_versions[i], bytes) else provides_versions[i]
 
-                            # Get the operator if flags are set
                             if provides_flags and i < len(provides_flags):
                                 flags = provides_flags[i]
-                                if flags & rpm.RPMSENSE_EQUAL:
+                                eq = flags & rpm.RPMSENSE_EQUAL
+                                gt = flags & rpm.RPMSENSE_GREATER
+                                lt = flags & rpm.RPMSENSE_LESS
+                                if eq and gt:
+                                    full_provide = f"{prov_name} >= {prov_version}"
+                                elif eq and lt:
+                                    full_provide = f"{prov_name} <= {prov_version}"
+                                elif eq:
                                     full_provide = f"{prov_name} = {prov_version}"
-                                elif flags & rpm.RPMSENSE_GREATER:
+                                elif gt:
                                     full_provide = f"{prov_name} > {prov_version}"
-                                elif flags & rpm.RPMSENSE_LESS:
+                                elif lt:
                                     full_provide = f"{prov_name} < {prov_version}"
-                                else:
-                                    full_provide = f"{prov_name} = {prov_version}"
 
                         provides_map[prov_name].append((rpm_file, prov_version, full_provide))
 
