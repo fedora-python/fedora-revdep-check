@@ -13,7 +13,8 @@ class MockRPMHeader:
     """Mock RPM header for testing."""
 
     def __init__(self, name, version, release, arch, epoch=None, sourcerpm=None,
-                 provides_names=None, provides_versions=None, provides_flags=None):
+                 sourcepackage=0, provides_names=None, provides_versions=None,
+                 provides_flags=None):
         self.data = {
             1000: name.encode() if isinstance(name, str) else name,
             1001: version.encode() if isinstance(version, str) else version,
@@ -21,6 +22,7 @@ class MockRPMHeader:
             1022: arch.encode() if isinstance(arch, str) else arch,
             1003: epoch,
             1044: sourcerpm.encode() if sourcerpm and isinstance(sourcerpm, str) else sourcerpm,
+            1106: sourcepackage,
             1047: provides_names,
             1113: provides_flags,
             1048: provides_versions,
@@ -92,6 +94,7 @@ class TestCheckRPMFiles:
              patch('rpm.RPMTAG_ARCH', 1022), \
              patch('rpm.RPMTAG_EPOCH', 1003), \
              patch('rpm.RPMTAG_SOURCERPM', 1044), \
+             patch('rpm.RPMTAG_SOURCEPACKAGE', 1106), \
              patch('rpm.RPMTAG_PROVIDENAME', 1047), \
              patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
              patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
@@ -164,6 +167,7 @@ class TestCheckRPMFiles:
              patch('rpm.RPMTAG_ARCH', 1022), \
              patch('rpm.RPMTAG_EPOCH', 1003), \
              patch('rpm.RPMTAG_SOURCERPM', 1044), \
+             patch('rpm.RPMTAG_SOURCEPACKAGE', 1106), \
              patch('rpm.RPMTAG_PROVIDENAME', 1047), \
              patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
              patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
@@ -242,6 +246,7 @@ class TestCheckRPMFiles:
              patch('rpm.RPMTAG_ARCH', 1022), \
              patch('rpm.RPMTAG_EPOCH', 1003), \
              patch('rpm.RPMTAG_SOURCERPM', 1044), \
+             patch('rpm.RPMTAG_SOURCEPACKAGE', 1106), \
              patch('rpm.RPMTAG_PROVIDENAME', 1047), \
              patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
              patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
@@ -312,6 +317,7 @@ class TestCheckRPMFiles:
              patch('rpm.RPMTAG_ARCH', 1022), \
              patch('rpm.RPMTAG_EPOCH', 1003), \
              patch('rpm.RPMTAG_SOURCERPM', 1044), \
+             patch('rpm.RPMTAG_SOURCEPACKAGE', 1106), \
              patch('rpm.RPMTAG_PROVIDENAME', 1047), \
              patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
              patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
@@ -383,6 +389,7 @@ class TestCheckRPMFiles:
              patch('rpm.RPMTAG_ARCH', 1022), \
              patch('rpm.RPMTAG_EPOCH', 1003), \
              patch('rpm.RPMTAG_SOURCERPM', 1044), \
+             patch('rpm.RPMTAG_SOURCEPACKAGE', 1106), \
              patch('rpm.RPMTAG_PROVIDENAME', 1047), \
              patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
              patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
