@@ -80,6 +80,8 @@ class TestReadRPMProvides:
              patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
              patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
              patch('rpm.RPMSENSE_EQUAL', 8), \
+             patch('rpm.RPMSENSE_GREATER', 4), \
+             patch('rpm.RPMSENSE_LESS', 2), \
              patch('os.path.exists', return_value=True), \
              patch('builtins.open', mock_open()):
 
@@ -140,6 +142,8 @@ class TestReadRPMProvides:
              patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
              patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
              patch('rpm.RPMSENSE_EQUAL', 8), \
+             patch('rpm.RPMSENSE_GREATER', 4), \
+             patch('rpm.RPMSENSE_LESS', 2), \
              patch('os.path.exists', return_value=True), \
              patch('builtins.open', mock_open()):
 
@@ -186,6 +190,8 @@ class TestReadRPMProvides:
              patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
              patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
              patch('rpm.RPMSENSE_EQUAL', 8), \
+             patch('rpm.RPMSENSE_GREATER', 4), \
+             patch('rpm.RPMSENSE_LESS', 2), \
              patch('os.path.exists', return_value=True), \
              patch('builtins.open', mock_open()):
 
@@ -230,6 +236,8 @@ class TestReadRPMProvides:
              patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
              patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
              patch('rpm.RPMSENSE_EQUAL', 8), \
+             patch('rpm.RPMSENSE_GREATER', 4), \
+             patch('rpm.RPMSENSE_LESS', 2), \
              patch('os.path.exists', return_value=True), \
              patch('builtins.open', mock_open()):
 
@@ -280,6 +288,8 @@ class TestReadRPMProvides:
              patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
              patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
              patch('rpm.RPMSENSE_EQUAL', 8), \
+             patch('rpm.RPMSENSE_GREATER', 4), \
+             patch('rpm.RPMSENSE_LESS', 2), \
              patch('os.path.exists', return_value=True), \
              patch('builtins.open', mock_open()):
 
@@ -322,6 +332,8 @@ class TestReadRPMProvides:
              patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
              patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
              patch('rpm.RPMSENSE_EQUAL', 8), \
+             patch('rpm.RPMSENSE_GREATER', 4), \
+             patch('rpm.RPMSENSE_LESS', 2), \
              patch('os.path.exists', return_value=True), \
              patch('builtins.open', mock_open()):
 
