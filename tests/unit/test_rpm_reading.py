@@ -16,16 +16,16 @@ class MockRPMHeader:
                  sourcepackage=0, provides_names=None, provides_versions=None,
                  provides_flags=None):
         self.data = {
-            1000: name.encode() if isinstance(name, str) else name,  # NAME
-            1001: version.encode() if isinstance(version, str) else version,  # VERSION
-            1002: release.encode() if isinstance(release, str) else release,  # RELEASE
-            1022: arch.encode() if isinstance(arch, str) else arch,  # ARCH
-            1003: epoch,  # EPOCH
-            1044: sourcerpm.encode() if sourcerpm and isinstance(sourcerpm, str) else sourcerpm,  # SOURCERPM
-            1106: sourcepackage,  # SOURCEPACKAGE
-            1047: provides_names,  # PROVIDENAME
-            1113: provides_flags,  # PROVIDEFLAGS
-            1048: provides_versions,  # PROVIDEVERSION
+            1000: name,
+            1001: version,
+            1002: release,
+            1022: arch,
+            1003: epoch,
+            1044: sourcerpm,
+            1106: sourcepackage,
+            1047: provides_names,
+            1113: provides_flags,
+            1048: provides_versions,
         }
 
     def __getitem__(self, key):
@@ -50,12 +50,12 @@ class TestReadRPMProvides:
             epoch=1,
             sourcerpm='python-sphinx-9.1.0-1.fc45.src.rpm',
             provides_names=[
-                b'python3-sphinx',
-                b'python3dist(sphinx)',
+                'python3-sphinx',
+                'python3dist(sphinx)',
             ],
             provides_versions=[
-                b'9.1.0-1.fc45',
-                b'9.1.0',
+                '9.1.0-1.fc45',
+                '9.1.0',
             ],
             provides_flags=[
                 8,  # RPMSENSE_EQUAL
@@ -108,8 +108,8 @@ class TestReadRPMProvides:
             arch='noarch',
             epoch=1,
             sourcerpm='python-sphinx-9.1.0-1.fc45.src.rpm',
-            provides_names=[b'python3-sphinx', b'python3dist(sphinx)'],
-            provides_versions=[b'9.1.0-1.fc45', b'9.1.0'],
+            provides_names=['python3-sphinx', 'python3dist(sphinx)'],
+            provides_versions=['9.1.0-1.fc45', '9.1.0'],
             provides_flags=[8, 8]
         )
 
@@ -120,8 +120,8 @@ class TestReadRPMProvides:
             arch='noarch',
             epoch=1,
             sourcerpm='python-sphinx-9.1.0-1.fc45.src.rpm',
-            provides_names=[b'python3-sphinx-latex'],
-            provides_versions=[b'9.1.0-1.fc45'],
+            provides_names=['python3-sphinx-latex'],
+            provides_versions=['9.1.0-1.fc45'],
             provides_flags=[8]
         )
 
@@ -168,8 +168,8 @@ class TestReadRPMProvides:
             arch='noarch',  # real SRPMs report noarch, not 'src'
             sourcerpm=None,
             sourcepackage=1,  # this is what identifies a source RPM
-            provides_names=[b'python-sphinx'],
-            provides_versions=[b'9.1.0-1.fc45'],
+            provides_names=['python-sphinx'],
+            provides_versions=['9.1.0-1.fc45'],
             provides_flags=[8]
         )
 
@@ -211,11 +211,11 @@ class TestReadRPMProvides:
             arch='noarch',
             sourcerpm='myapp-1.0.0-1.fc45.src.rpm',
             provides_names=[
-                b'myapp',
-                b'bundled(libfoo)',
-                b'bundled(libbar)',
+                'myapp',
+                'bundled(libfoo)',
+                'bundled(libbar)',
             ],
-            provides_versions=[b'1.0.0', b'2.0', b'3.0'],
+            provides_versions=['1.0.0', '2.0', '3.0'],
             provides_flags=[8, 8, 8]
         )
 
@@ -255,8 +255,8 @@ class TestReadRPMProvides:
             release='1.fc45',
             arch='noarch',
             sourcerpm='python-sphinx-9.1.0-1.fc45.src.rpm',
-            provides_names=[b'python3-sphinx'],
-            provides_versions=[b'9.1.0'],
+            provides_names=['python3-sphinx'],
+            provides_versions=['9.1.0'],
             provides_flags=[8]
         )
 
@@ -266,8 +266,8 @@ class TestReadRPMProvides:
             release='1.fc45',
             arch='noarch',
             sourcerpm='python-requests-2.32.0-1.fc45.src.rpm',
-            provides_names=[b'python3-requests'],
-            provides_versions=[b'2.32.0'],
+            provides_names=['python3-requests'],
+            provides_versions=['2.32.0'],
             provides_flags=[8]
         )
 
@@ -310,8 +310,8 @@ class TestReadRPMProvides:
             arch='noarch',
             epoch=None,
             sourcerpm='mypackage-1.0.0-1.fc45.src.rpm',
-            provides_names=[b'mypackage'],
-            provides_versions=[b'1.0.0'],
+            provides_names=['mypackage'],
+            provides_versions=['1.0.0'],
             provides_flags=[8]
         )
 
