@@ -1,10 +1,11 @@
 """
 Unit tests for RPM file reading functionality.
 
-Tests the read_rpm_provides() method which reads provides from actual RPM files.
+Tests the read_rpm_provides() method using mocked RPM headers (no real RPM files).
 """
 
 import pytest
+from contextlib import contextmanager
 from unittest.mock import Mock, mock_open, patch
 from fedora_revdep_check import FedoraRevDepChecker
 
@@ -30,6 +31,30 @@ class MockRPMHeader:
 
     def __getitem__(self, key):
         return self.data.get(key)
+
+
+@contextmanager
+def rpm_patches(mock_ts):
+    """Context manager providing all rpm module patches needed for tests."""
+    with (patch('rpm.TransactionSet', return_value=mock_ts),
+          patch('rpm._RPMVSF_NOSIGNATURES', 0),
+          patch('rpm._RPMVSF_NODIGESTS', 0),
+          patch('rpm.RPMTAG_NAME', 1000),
+          patch('rpm.RPMTAG_VERSION', 1001),
+          patch('rpm.RPMTAG_RELEASE', 1002),
+          patch('rpm.RPMTAG_ARCH', 1022),
+          patch('rpm.RPMTAG_EPOCH', 1003),
+          patch('rpm.RPMTAG_SOURCERPM', 1044),
+          patch('rpm.RPMTAG_SOURCEPACKAGE', 1106),
+          patch('rpm.RPMTAG_PROVIDENAME', 1047),
+          patch('rpm.RPMTAG_PROVIDEFLAGS', 1113),
+          patch('rpm.RPMTAG_PROVIDEVERSION', 1048),
+          patch('rpm.RPMSENSE_EQUAL', 8),
+          patch('rpm.RPMSENSE_GREATER', 4),
+          patch('rpm.RPMSENSE_LESS', 2),
+          patch('os.path.exists', return_value=True),
+          patch('builtins.open', mock_open())):
+        yield
 
 
 class TestReadRPMProvides:
@@ -66,24 +91,7 @@ class TestReadRPMProvides:
         mock_ts = Mock()
         mock_ts.hdrFromFdno = Mock(return_value=mock_header)
 
-        with patch('rpm.TransactionSet', return_value=mock_ts), \
-             patch('rpm._RPMVSF_NOSIGNATURES', 0), \
-             patch('rpm._RPMVSF_NODIGESTS', 0), \
-             patch('rpm.RPMTAG_NAME', 1000), \
-             patch('rpm.RPMTAG_VERSION', 1001), \
-             patch('rpm.RPMTAG_RELEASE', 1002), \
-             patch('rpm.RPMTAG_ARCH', 1022), \
-             patch('rpm.RPMTAG_EPOCH', 1003), \
-             patch('rpm.RPMTAG_SOURCERPM', 1044), \
-             patch('rpm.RPMTAG_SOURCEPACKAGE', 1106), \
-             patch('rpm.RPMTAG_PROVIDENAME', 1047), \
-             patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
-             patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
-             patch('rpm.RPMSENSE_EQUAL', 8), \
-             patch('rpm.RPMSENSE_GREATER', 4), \
-             patch('rpm.RPMSENSE_LESS', 2), \
-             patch('os.path.exists', return_value=True), \
-             patch('builtins.open', mock_open()):
+        with rpm_patches(mock_ts):
 
             result = checker.read_rpm_provides(['/tmp/test.rpm'])
 
@@ -128,24 +136,7 @@ class TestReadRPMProvides:
         mock_ts = Mock()
         mock_ts.hdrFromFdno = Mock(side_effect=[mock_header1, mock_header2])
 
-        with patch('rpm.TransactionSet', return_value=mock_ts), \
-             patch('rpm._RPMVSF_NOSIGNATURES', 0), \
-             patch('rpm._RPMVSF_NODIGESTS', 0), \
-             patch('rpm.RPMTAG_NAME', 1000), \
-             patch('rpm.RPMTAG_VERSION', 1001), \
-             patch('rpm.RPMTAG_RELEASE', 1002), \
-             patch('rpm.RPMTAG_ARCH', 1022), \
-             patch('rpm.RPMTAG_EPOCH', 1003), \
-             patch('rpm.RPMTAG_SOURCERPM', 1044), \
-             patch('rpm.RPMTAG_SOURCEPACKAGE', 1106), \
-             patch('rpm.RPMTAG_PROVIDENAME', 1047), \
-             patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
-             patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
-             patch('rpm.RPMSENSE_EQUAL', 8), \
-             patch('rpm.RPMSENSE_GREATER', 4), \
-             patch('rpm.RPMSENSE_LESS', 2), \
-             patch('os.path.exists', return_value=True), \
-             patch('builtins.open', mock_open()):
+        with rpm_patches(mock_ts):
 
             result = checker.read_rpm_provides(['/tmp/test1.rpm', '/tmp/test2.rpm'])
 
@@ -176,24 +167,7 @@ class TestReadRPMProvides:
         mock_ts = Mock()
         mock_ts.hdrFromFdno = Mock(return_value=mock_header)
 
-        with patch('rpm.TransactionSet', return_value=mock_ts), \
-             patch('rpm._RPMVSF_NOSIGNATURES', 0), \
-             patch('rpm._RPMVSF_NODIGESTS', 0), \
-             patch('rpm.RPMTAG_NAME', 1000), \
-             patch('rpm.RPMTAG_VERSION', 1001), \
-             patch('rpm.RPMTAG_RELEASE', 1002), \
-             patch('rpm.RPMTAG_ARCH', 1022), \
-             patch('rpm.RPMTAG_EPOCH', 1003), \
-             patch('rpm.RPMTAG_SOURCERPM', 1044), \
-             patch('rpm.RPMTAG_SOURCEPACKAGE', 1106), \
-             patch('rpm.RPMTAG_PROVIDENAME', 1047), \
-             patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
-             patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
-             patch('rpm.RPMSENSE_EQUAL', 8), \
-             patch('rpm.RPMSENSE_GREATER', 4), \
-             patch('rpm.RPMSENSE_LESS', 2), \
-             patch('os.path.exists', return_value=True), \
-             patch('builtins.open', mock_open()):
+        with rpm_patches(mock_ts):
 
             result = checker.read_rpm_provides(['/tmp/test.src.rpm'])
 
@@ -222,24 +196,7 @@ class TestReadRPMProvides:
         mock_ts = Mock()
         mock_ts.hdrFromFdno = Mock(return_value=mock_header)
 
-        with patch('rpm.TransactionSet', return_value=mock_ts), \
-             patch('rpm._RPMVSF_NOSIGNATURES', 0), \
-             patch('rpm._RPMVSF_NODIGESTS', 0), \
-             patch('rpm.RPMTAG_NAME', 1000), \
-             patch('rpm.RPMTAG_VERSION', 1001), \
-             patch('rpm.RPMTAG_RELEASE', 1002), \
-             patch('rpm.RPMTAG_ARCH', 1022), \
-             patch('rpm.RPMTAG_EPOCH', 1003), \
-             patch('rpm.RPMTAG_SOURCERPM', 1044), \
-             patch('rpm.RPMTAG_SOURCEPACKAGE', 1106), \
-             patch('rpm.RPMTAG_PROVIDENAME', 1047), \
-             patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
-             patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
-             patch('rpm.RPMSENSE_EQUAL', 8), \
-             patch('rpm.RPMSENSE_GREATER', 4), \
-             patch('rpm.RPMSENSE_LESS', 2), \
-             patch('os.path.exists', return_value=True), \
-             patch('builtins.open', mock_open()):
+        with rpm_patches(mock_ts):
 
             result = checker.read_rpm_provides(['/tmp/myapp.rpm'])
 
@@ -274,24 +231,7 @@ class TestReadRPMProvides:
         mock_ts = Mock()
         mock_ts.hdrFromFdno = Mock(side_effect=[mock_header1, mock_header2])
 
-        with patch('rpm.TransactionSet', return_value=mock_ts), \
-             patch('rpm._RPMVSF_NOSIGNATURES', 0), \
-             patch('rpm._RPMVSF_NODIGESTS', 0), \
-             patch('rpm.RPMTAG_NAME', 1000), \
-             patch('rpm.RPMTAG_VERSION', 1001), \
-             patch('rpm.RPMTAG_RELEASE', 1002), \
-             patch('rpm.RPMTAG_ARCH', 1022), \
-             patch('rpm.RPMTAG_EPOCH', 1003), \
-             patch('rpm.RPMTAG_SOURCERPM', 1044), \
-             patch('rpm.RPMTAG_SOURCEPACKAGE', 1106), \
-             patch('rpm.RPMTAG_PROVIDENAME', 1047), \
-             patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
-             patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
-             patch('rpm.RPMSENSE_EQUAL', 8), \
-             patch('rpm.RPMSENSE_GREATER', 4), \
-             patch('rpm.RPMSENSE_LESS', 2), \
-             patch('os.path.exists', return_value=True), \
-             patch('builtins.open', mock_open()):
+        with rpm_patches(mock_ts):
 
             with pytest.raises(ValueError, match="multiple source packages"):
                 checker.read_rpm_provides(['/tmp/test1.rpm', '/tmp/test2.rpm'])
@@ -318,24 +258,7 @@ class TestReadRPMProvides:
         mock_ts = Mock()
         mock_ts.hdrFromFdno = Mock(return_value=mock_header)
 
-        with patch('rpm.TransactionSet', return_value=mock_ts), \
-             patch('rpm._RPMVSF_NOSIGNATURES', 0), \
-             patch('rpm._RPMVSF_NODIGESTS', 0), \
-             patch('rpm.RPMTAG_NAME', 1000), \
-             patch('rpm.RPMTAG_VERSION', 1001), \
-             patch('rpm.RPMTAG_RELEASE', 1002), \
-             patch('rpm.RPMTAG_ARCH', 1022), \
-             patch('rpm.RPMTAG_EPOCH', 1003), \
-             patch('rpm.RPMTAG_SOURCERPM', 1044), \
-             patch('rpm.RPMTAG_SOURCEPACKAGE', 1106), \
-             patch('rpm.RPMTAG_PROVIDENAME', 1047), \
-             patch('rpm.RPMTAG_PROVIDEFLAGS', 1113), \
-             patch('rpm.RPMTAG_PROVIDEVERSION', 1048), \
-             patch('rpm.RPMSENSE_EQUAL', 8), \
-             patch('rpm.RPMSENSE_GREATER', 4), \
-             patch('rpm.RPMSENSE_LESS', 2), \
-             patch('os.path.exists', return_value=True), \
-             patch('builtins.open', mock_open()):
+        with rpm_patches(mock_ts):
 
             result = checker.read_rpm_provides(['/tmp/test.rpm'])
 
