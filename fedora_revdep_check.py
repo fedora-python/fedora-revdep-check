@@ -349,10 +349,11 @@ class FedoraRevDepChecker:
                     # This is a source RPM
                     srpm_names.add(name)
 
-                # Skip source RPMs for provides
-                if arch == 'src':
+                # Skip source RPMs for provides (RPMTAG_SOURCEPACKAGE is set for SRPMs
+                # regardless of the arch tag, which may report 'noarch' for some SRPMs)
+                if hdr[rpm.RPMTAG_SOURCEPACKAGE]:
                     if self.verbose:
-                        print(f"Skipping source RPM: {name}-{version}-{release}.{arch}")
+                        print(f"Skipping source RPM: {name}-{version}-{release}")
                     continue
 
                 rpm_info[rpm_file] = {
